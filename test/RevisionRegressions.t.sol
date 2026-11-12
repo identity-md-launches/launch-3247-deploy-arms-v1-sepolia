@@ -234,8 +234,9 @@ contract DrawOptOutTest is ArmsBase {
         assertEq(arms.formRegistry().bondAsOf(low, next), arms.minBond() + 400 ether);
     }
 
-    /// `lastStateChange` still moves when a bond makes the arm newly active or cancels an exit, so a
-    /// newly active arm cannot join an older job either.
+    /// `lastStateChange` still moves when a bond makes the arm newly active, so a newly active arm cannot
+    /// join an older job either. A bond that cancels an exit does not move it (finding cab68d38): the
+    /// jobs posted during the exit are closed by the zero bond `requestExit` checkpointed instead.
     function test_newlyActiveBondStillInvalidatesOlderJobs() public {
         address fresh = makeAddr("fresh");
         _fund(fresh, 1000 ether);
@@ -245,12 +246,116 @@ contract DrawOptOutTest is ArmsBase {
         assertEq(arms.lastStateChange(fresh), vm.getBlockNumber(), "first activation resets the snapshot");
 
         address leaver = armSet[2];
+        uint256 before = arms.lastStateChange(leaver);
         vm.prank(leaver);
         arms.requestExit();
         vm.roll(vm.getBlockNumber() + 1);
         vm.prank(leaver);
         arms.bond(1);
-        assertEq(arms.lastStateChange(leaver), vm.getBlockNumber(), "a cancelled exit resets the snapshot");
+        assertEq(arms.lastStateChange(leaver), before, "a cancelled exit does not reset the snapshot");
+    }
+}
+
+/// @dev Finding cab68d38: `requestExit(); bond(1)` after the seed is visible used to bump
+/// `lastStateChange` and so removed an eligible arm from an older job for one wei. Now a cancelled exit
+/// is prospective by job id like the exit itself: the arm keeps every job it was eligible for when it
+/// asked to exit and never gains one posted while it was exiting.
+contract ExitCancelOptOutTest is ArmsBase {
+    function _postAndRevealSeed() internal returns (uint256 id, address firstPick) {
+        id = _post();
+        Arms.Job memory j = _job(id);
+        vm.roll(j.seedBlock + 1);
+        uint256 seed = uint256(keccak256(abi.encode(blockhash(j.seedBlock), id, uint256(0))));
+        uint256 idx = uint256(keccak256(abi.encode(seed, uint256(0)))) % j.serverCount;
+        firstPick = arms.formRegistry().serversOf(formId)[idx];
+        assertTrue(arms.isActive(firstPick));
+    }
+
+    function _isDrawn(uint256 id, address a) internal view returns (bool) {
+        address[] memory drawn = arms.armsOf(id);
+        for (uint256 i; i < drawn.length; ++i) {
+            if (drawn[i] == a) return true;
+        }
+        return false;
+    }
+
+    /// The reviewer's scenario: the first pick exits and re-bonds one wei in the block after the seed.
+    function test_exitThenOneWeiBondDoesNotOptOutOfAnOlderJob() public {
+        (uint256 id, address dodger) = _postAndRevealSeed();
+        uint256 before = arms.lastStateChange(dodger);
+        vm.startPrank(dodger);
+        arms.requestExit();
+        arms.bond(1);
+        vm.stopPrank();
+        assertTrue(arms.isActive(dodger), "active again");
+        assertEq(arms.lastStateChange(dodger), before, "a cancelled exit is not a snapshot reset");
+        assertEq(arms.formRegistry().bondAsOf(dodger, id), ARM_BOND, "the older job reads the bond it had");
+        arms.draw(id);
+        assertTrue(_isDrawn(id, dodger), "requestExit + bond(1) opted the arm out of an older job");
+    }
+
+    /// The direction the old bump guarded: a job posted (in a later block) while the arm was exiting
+    /// stays closed to it after the rejoin, because `requestExit` checkpointed a zero bond for it.
+    function test_jobPostedDuringExitStaysClosedAfterRejoin() public {
+        address leaver = armSet[0];
+        vm.prank(leaver);
+        arms.requestExit();
+        uint256 during = _post(); // a later block: `lastStateChange` alone would not exclude it
+        vm.roll(vm.getBlockNumber() + 1);
+        vm.prank(leaver);
+        arms.bond(1);
+        assertTrue(arms.isActive(leaver));
+        assertEq(arms.formRegistry().bondAsOf(leaver, during), 0, "posted while exiting");
+        _fill(during);
+        assertFalse(_isDrawn(during, leaver), "an exit cancelled after the post cannot join it");
+        uint256 after_ = _post();
+        assertEq(arms.formRegistry().bondAsOf(leaver, after_), ARM_BOND + 1, "later jobs count the bond");
+    }
+
+    /// Two exit/rejoin cycles: the jobs of the first exit stay closed after the second, and a job
+    /// posted between the cycles stays open to the arm through its second exit.
+    function test_everyExitIntervalStaysClosedAcrossCycles() public {
+        address leaver = armSet[0];
+        vm.prank(leaver);
+        arms.requestExit();
+        uint256 first = _post();
+        vm.roll(vm.getBlockNumber() + 1);
+        vm.prank(leaver);
+        arms.bond(1);
+        uint256 between = _post();
+        vm.prank(leaver);
+        arms.requestExit();
+        uint256 second = _post();
+        vm.roll(vm.getBlockNumber() + 1);
+        vm.prank(leaver);
+        arms.bond(1);
+        ArmsForms reg = arms.formRegistry();
+        assertEq(reg.bondAsOf(leaver, first), 0, "first exit interval");
+        assertEq(reg.bondAsOf(leaver, between), ARM_BOND + 1, "between the cycles");
+        assertEq(reg.bondAsOf(leaver, second), 0, "second exit interval");
+        _fill(first);
+        assertFalse(_isDrawn(first, leaver));
+        _fill(second);
+        assertFalse(_isDrawn(second, leaver));
+    }
+
+    /// Any bond checkpoint written while exiting (here a partial withdrawal) records zero, so a job
+    /// posted after it is still closed once the arm rejoins.
+    function test_checkpointsWrittenWhileExitingRecordZero() public {
+        address leaver = armSet[0];
+        vm.prank(leaver);
+        arms.requestExit();
+        vm.warp(block.timestamp + 14 days);
+        vm.prank(leaver);
+        arms.withdraw();
+        assertEq(arms.unlockedBond(leaver), 0);
+        uint256 during = _post();
+        vm.prank(leaver);
+        arms.bond(ARM_BOND);
+        assertTrue(arms.isActive(leaver));
+        assertEq(arms.formRegistry().bondAsOf(leaver, during), 0);
+        _fill(during);
+        assertFalse(_isDrawn(during, leaver));
     }
 }
 

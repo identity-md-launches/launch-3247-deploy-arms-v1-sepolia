@@ -140,6 +140,31 @@ re-serving or topping up after the post. `test_audit2_stateChangeInPostingBlockO
 encoded the old same-block exclusion and was rewritten to the new rule (a cancelled exit and a fee
 cut in the posting block still cannot join). Tests: `DrawOptOutTest`.
 
+### cab68d38 (second revision) — `requestExit(); bond(1)` still opted an arm out of an older job (src/Arms.sol) — fixed
+
+Residual path of 27019183, reported with a proof that failed on the accepted tree. `bond` took
+`wasActive = isActive(msg.sender)`, which is false while the arm is exiting, so the top-up that
+cancelled an exit bumped `lastStateChange` to the current block and `_eligible` then refused the arm
+for every job posted at or before it, including the job it had been eligible for when it asked to
+exit. Cost of the opt-out: one wei plus gas, after the seed was public.
+
+The bump was only there to keep a rejoining arm out of the jobs posted *while* it was exiting. That is
+now done by the bond history the registry already keeps: `_checkpointBond` writes **zero** whenever
+the arm is exiting (`requestExit` checkpoints at once; a withdrawal, a no-show loss or a slash during
+the exit write zero too), and the rejoin writes the real bond at the current job id. `bondAsOf` for a
+job posted during any exit interval is therefore zero for good, however many exit/rejoin cycles
+follow, while jobs posted before the exit read the bond the arm then held. `bond` no longer touches
+`lastStateChange` on a cancelled exit; it still does on a first activation. `exitAfterJob` and the
+`exiting` check in `_eligible` are unchanged. Arms' runtime is 24,486 bytes (90 below EIP-170).
+
+Two tests encoded the old rule and were rewritten to the new one:
+`test_audit2_stateChangeInPostingBlockOrAfterExcludesOldJob` now asserts the snapshot is untouched and
+the job posted during the exit reads a zero bond (the draw still admits nobody), and
+`test_newlyActiveBondStillInvalidatesOlderJobs` asserts a cancelled exit does not reset the snapshot.
+New: `ExitCancelOptOutTest` in `test/RevisionRegressions.t.sol` (the reviewer's scenario, a job posted
+in a later block during the exit stays closed after the rejoin, two exit cycles, and a withdrawal
+during an exit). The README's eligibility paragraph was updated. The reviewer's proof passes.
+
 ### b3e816d4 — CLAIMED after NEITHER on the same key never corrected it (src/Arms.sol) — fixed
 
 `resolve` applies a CLAIMED ruling when the key is still AGREED/MAJORITY **or** already OVERTURNED:

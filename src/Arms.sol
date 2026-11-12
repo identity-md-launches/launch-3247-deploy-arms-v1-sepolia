@@ -343,14 +343,17 @@ contract Arms {
         if (amount == 0) revert ZeroAmount();
         ArmInfo storage a = arms[msg.sender];
         if (a.bond + amount > maxBondPerArm || totalBonded + amount > maxTotalBonded) revert BondCap();
-        // Only a top-up that makes the arm newly active (first bond above `minBond`, a cancelled exit)
-        // invalidates older jobs. An already active arm's top-up counts for later jobs only, so it
-        // can neither opt in to nor opt out of a job whose seed is already visible.
+        // Only a top-up that makes the arm newly active (first bond above `minBond`) invalidates older
+        // jobs. An already active arm's top-up counts for later jobs only, and so does a top-up that
+        // cancels an exit: the arm stays eligible for the jobs it was drawn-eligible for when it asked to
+        // exit, and the zero bond checkpointed while it was exiting keeps it out of the jobs posted in
+        // between. So an arm can neither opt in to nor opt out of a job whose seed is already visible.
         bool wasActive = isActive(msg.sender);
+        bool rejoin = a.exiting;
         a.bond += amount;
-        if (!wasActive) lastStateChange[msg.sender] = Blocks.number(arbitrumBlocks);
+        if (!wasActive && !rejoin) lastStateChange[msg.sender] = Blocks.number(arbitrumBlocks);
         totalBonded += amount;
-        if (a.exiting) {
+        if (rejoin) {
             a.exiting = false;
             a.exitAt = 0;
         }
@@ -366,6 +369,8 @@ contract Arms {
         a.exiting = true;
         exitAfterJob[msg.sender] = jobCount;
         a.exitAt = uint64(block.timestamp + exitDelay);
+        // Jobs posted from here until the exit is cancelled read a zero bond, permanently.
+        _checkpointBond(msg.sender);
         emit ExitRequested(msg.sender, a.exitAt);
     }
 
@@ -895,9 +900,11 @@ contract Arms {
     }
 
     /// @dev Records the arm's bond for jobs posted after this change; `_eligible` reads the bond an arm
-    /// had when the job was posted.
+    /// had when the job was posted. An exiting arm records zero, whatever it holds, so every job posted
+    /// while it was exiting stays closed to it after a rejoin, however many exits it goes through.
     function _checkpointBond(address a) internal {
-        formRegistry.noteBond(a, jobCount, arms[a].bond);
+        ArmInfo storage s = arms[a];
+        formRegistry.noteBond(a, jobCount, s.exiting ? 0 : s.bond);
     }
 
     function _eligible(uint256 jobId, Job storage j, address a) internal view returns (bool) {

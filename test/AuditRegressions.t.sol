@@ -141,9 +141,11 @@ contract AuditRegressionsTest is ArmsBase {
         _balanced();
     }
 
-    /// @dev Revised with finding 27019183: a change that makes an arm newly eligible (here a cancelled
-    /// exit, and a fee cut) still cannot join an older job, while an already eligible arm's top-up in
-    /// the posting block neither joins nor leaves it (test/RevisionRegressions.t.sol covers the latter).
+    /// @dev Revised with findings 27019183 and cab68d38: a change that makes an arm newly eligible (here
+    /// a cancelled exit, and a fee cut) still cannot join an older job, while an already eligible arm's
+    /// top-up in the posting block neither joins nor leaves it (test/RevisionRegressions.t.sol covers the
+    /// latter). A cancelled exit no longer moves `lastStateChange`; the job posted during the exit reads
+    /// the zero bond checkpointed by `requestExit` instead.
     function test_audit2_stateChangeInPostingBlockOrAfterExcludesOldJob() public {
         for (uint256 i; i < armSet.length; ++i) {
             vm.prank(armSet[i]);
@@ -151,9 +153,11 @@ contract AuditRegressionsTest is ArmsBase {
         }
         uint256 id = _post();
         for (uint256 i; i < armSet.length; ++i) {
+            uint256 before = arms.lastStateChange(armSet[i]);
             vm.prank(armSet[i]);
             arms.bond(1); // cancels the exit in the posting block
-            assertEq(arms.lastStateChange(armSet[i]), _job(id).postedBlock);
+            assertEq(arms.lastStateChange(armSet[i]), before, "a cancelled exit is prospective by job id");
+            assertEq(arms.formRegistry().bondAsOf(armSet[i], id), 0, "posted while exiting: zero bond");
         }
         vm.roll(vm.getBlockNumber() + 2);
         arms.draw(id);

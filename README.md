@@ -143,16 +143,20 @@ never remove, reorder or duplicate that index. `minFeeOf` retains the last adver
 `stoppedAt` indicates the stop instead of erasing that fee.
 
 A job stores the form-list length (`serverCount`) and chain-local posting block (`postedBlock`). A
-change that makes an arm newly active (its first bond above `minBond`, a bond that cancels an exit,
-reactivation), a withdrawal, a strike and a slash update `lastStateChange`. It must be **strictly
-earlier** than the posting block for a draw, including replacements and the initial tie breaker, so a
-newly active arm cannot join an older job. Everything else is prospective **by job id**: a serve, a
-fee change, a stop, an exit and an already active arm's bond top-up apply to jobs posted after them
-and never to a job posted before. The registry keeps the fee an arm advertised, and the bond it held,
-as of each job's posting (`ArmsForms.feeAsOf`, `ArmsForms.bondAsOf`): `candidate` uses the fee of
-the job's own time, and the draw counts the smaller of the bond then and the bond now. So an arm can
-neither opt out of an older job after its seed is visible (by re-serving, raising its fee or topping
-up one wei) nor opt in to one (by serving, cutting its fee, re-serving after a stop or topping up).
+change that makes an arm newly active (its first bond above `minBond`, reactivation), a withdrawal, a
+strike and a slash update `lastStateChange`. It must be **strictly earlier** than the posting block for
+a draw, including replacements and the initial tie breaker, so a newly active arm cannot join an older
+job. Everything else is prospective **by job id**: a serve, a fee change, a stop, an exit, a bond that
+cancels an exit and an already active arm's bond top-up apply to jobs posted after them and never to a
+job posted before. The registry keeps the fee an arm advertised, and the bond it held, as of each
+job's posting (`ArmsForms.feeAsOf`, `ArmsForms.bondAsOf`): `candidate` uses the fee of the job's own
+time, and the draw counts the smaller of the bond then and the bond now. While an arm is exiting every
+bond checkpoint it writes records **zero**, so each job posted during an exit stays closed to that arm
+after it re-bonds, through any number of exit and rejoin cycles, while the jobs it was eligible for
+when it asked to exit remain its. So an arm can neither opt out of an older job after its seed is
+visible (by re-serving, raising its fee, topping up one wei, or requesting an exit and cancelling it
+with one wei) nor opt in to one (by serving, cutting its fee, re-serving after a stop, topping up or
+cancelling an exit).
 An already selected arm retains its duties and locked tranche regardless of these later changes.
 Signer rotation does not change eligibility.
 
