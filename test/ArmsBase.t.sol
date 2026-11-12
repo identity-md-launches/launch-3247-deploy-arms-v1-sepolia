@@ -88,7 +88,7 @@ abstract contract ArmsBase is Test {
 
     function _fund(address who, uint256 amount) internal {
         vm.prank(tokenOwner);
-        token.mint(who, amount);
+        token.transfer(who, amount);
         vm.prank(who);
         token.approve(address(arms), type(uint256).max);
     }

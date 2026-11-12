@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {Strings} from "./compat/Strings.sol";
 import {OracleAttestation} from "./OracleAttestation.sol";
 
 /// @title The oracle question's hash, computed on chain

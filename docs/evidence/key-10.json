@@ -1,0 +1,20 @@
+{
+  "humanKey": 10,
+  "armsIndex": 9,
+  "chainId": 11155111,
+  "target": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+  "atBlock": 12121156,
+  "blockHash": "0x86bdfba226ef1b0847d1ba569407291985629896f3b91afb2cc7e2abbcae3da8",
+  "answer": "NONE",
+  "bytes32": "0x4e4f4e4500000000000000000000000000000000000000000000000000000000",
+  "reason": "Neither ImdTest.mint nor mintBatch nor ERC20._mint enforces a lifetime, outstanding-supply or per-account tokenomics cap. Integer overflow protection is not a supply cap. The unrestricted owner path makes NONE the applicable cap class.",
+  "sources": [
+    "https://eth-sepolia.blockscout.com/api/v2/smart-contracts/0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+    "https://ethereum-sepolia-rpc.publicnode.com"
+  ],
+  "localEvidence": [
+    "sepolia-readback.json",
+    "ImdTest-verified-source.json"
+  ],
+  "verificationLimitation": "Blockscout reports verified source with a partial compilation match (not full metadata verification); deployed runtime bytes match the pinned-block RPC result. No real Arms check has been posted."
+}

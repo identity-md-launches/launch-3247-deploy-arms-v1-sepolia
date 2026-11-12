@@ -471,7 +471,7 @@ contract AuditRegressionsTest is ArmsBase {
 
     function test_audit7_uriCharactersAndCourtQuotes() public {
         IMDCourt real = new IMDCourt(
-            IIntake(address(court)), IERC20(address(token)), bytes32("oracle.request@oracle-1"), challenger
+            tokenOwner, IIntake(address(court)), IERC20(address(token)), bytes32("oracle.request@oracle-1"), challenger
         );
         string[8] memory invalid =
             ["ipfs://x y", "ipfs://x\n", 'ipfs://x"', "ipfs://x\\", "ipfs://<x>", "ipfs://{x}", "", unicode"ipfs://é"];

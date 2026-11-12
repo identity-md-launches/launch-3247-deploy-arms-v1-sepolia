@@ -1,0 +1,20 @@
+{
+  "humanKey": 4,
+  "armsIndex": 3,
+  "chainId": 11155111,
+  "target": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+  "atBlock": 12121156,
+  "blockHash": "0x86bdfba226ef1b0847d1ba569407291985629896f3b91afb2cc7e2abbcae3da8",
+  "answer": "0x047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7",
+  "bytes32": "0x000000000000000000000000047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7",
+  "reason": "owner() at the pinned block returned 0x047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7. eth_getCode for that address at the same block returned 0x, so the walk ends after one hop.",
+  "sources": [
+    "https://eth-sepolia.blockscout.com/api/v2/smart-contracts/0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+    "https://ethereum-sepolia-rpc.publicnode.com"
+  ],
+  "localEvidence": [
+    "sepolia-readback.json",
+    "ImdTest-verified-source.json"
+  ],
+  "verificationLimitation": "Blockscout reports verified source with a partial compilation match (not full metadata verification); deployed runtime bytes match the pinned-block RPC result. No real Arms check has been posted."
+}

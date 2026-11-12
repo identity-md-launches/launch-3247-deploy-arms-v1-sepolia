@@ -1,0 +1,53 @@
+{
+  "endpoint": "https://api.imd.fun/requests/quote",
+  "note": "Unpaid schema probes only. The existing target address is used as a real consumer-domain example, not as an Arms deployment. No request was paid or sent on chain.",
+  "checks": [
+    {
+      "variant": "original-address-string",
+      "request": {
+        "v": 1,
+        "question": "Does the verified ImdTest contract 0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf on Sepolia chain 11155111, at block 12121156, have a callable mint(address,uint256) function authorized for its owner? Answer 1 for yes and 0 for no. Inspect the verified ImdTest source and owner() at that block.",
+        "chainId": 11155111,
+        "window": {
+          "fromBlock": 12121156,
+          "toBlock": 12121156
+        },
+        "answerType": "uint256",
+        "evidence": "panel",
+        "panelSize": 5,
+        "quorum": 4,
+        "validForSeconds": 86400,
+        "consumer": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf"
+      },
+      "httpStatus": "400",
+      "response": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "variant": "documented-consumer-object",
+      "request": {
+        "v": 1,
+        "question": "Does the verified ImdTest contract 0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf on Sepolia chain 11155111, at block 12121156, have a callable mint(address,uint256) function authorized for its owner? Answer 1 for yes and 0 for no. Inspect the verified ImdTest source and owner() at that block.",
+        "chainId": 11155111,
+        "window": {
+          "fromBlock": 12121156,
+          "toBlock": 12121156
+        },
+        "answerType": "uint256",
+        "evidence": "panel",
+        "panelSize": 5,
+        "quorum": 4,
+        "validForSeconds": 86400,
+        "consumer": {
+          "chainId": 11155111,
+          "verifyingContract": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf"
+        }
+      },
+      "httpStatus": "201",
+      "response": {
+        "created": true
+      }
+    }
+  ]
+}

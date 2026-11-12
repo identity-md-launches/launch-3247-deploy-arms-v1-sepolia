@@ -3,7 +3,8 @@ pragma solidity 0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {Strings} from "./compat/Strings.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ICourt} from "./ICourt.sol";
 import {IIntake} from "./IIntake.sol";
 import {OracleAttestation, OracleAttestationConsumer} from "./OracleAttestation.sol";
@@ -14,15 +15,14 @@ import {FormURI} from "./FormURI.sol";
 /// @notice Every case is one `oracle.request` through the IMD `Intake`: a fixed question shape about
 /// one key of one form for one target contract, answered by a panel of 5 with a quorum of 4 as a
 /// `uint256` (1 stored, 2 claimed, 0 neither). The answer comes back signed as an EIP-712
-/// `OracleAttestation` in this contract's domain by the oracle signer fixed at deploy; the callback
+/// `OracleAttestation` in this contract's domain by the configured oracle signer; the callback
 /// only stores the ruling. A case that is refused, disagreed or never answered stays `NONE`, and
 /// `Arms` closes it at its `courtDeadline`.
 ///
-/// There is no owner: the intake, the asset, the action id and the signer are immutable. A moved
-/// price is read live through `priceOf`; a new action version or a rotated signer needs a new court,
-/// which `Arms` cannot switch to either (it is immutable there too), so a redeploy of both. That is
-/// the brief's choice (no admin anywhere) and is documented in the README.
-contract IMDCourt is ICourt, OracleAttestationConsumer {
+/// The launch owner may migrate oracle trust anchors; Arms accounting stays ownerless. A dishonest
+/// configuration owner can select a dishonest attester. Pending requests retain their original
+/// intake; signer changes apply immediately to every case.
+contract IMDCourt is ICourt, OracleAttestationConsumer, Ownable {
     using SafeERC20 for IERC20;
 
     struct Case {
@@ -31,6 +31,7 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
         address payer;
         bytes32 requestId;
         bytes32 questionHash;
+        address requestIntake;
         Ruling ruling;
         bool open;
         bool exists;
@@ -45,6 +46,7 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
     error BadParams();
     error BadFormURI();
     error ChainNotSupported();
+    error ActionNotSold();
 
     event CaseOpened(
         address indexed asker, bytes32 indexed caseId, bytes32 indexed requestId, address payer, bytes32 questionHash
@@ -55,32 +57,49 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
     event CaseFailed(
         address indexed asker, bytes32 indexed caseId, bytes32 indexed requestId, uint8 status, bytes32 reason
     );
+    event OracleConfigSet(address indexed intake, address indexed asset, bytes32 action);
 
     uint16 public constant PANEL_SIZE = 5;
     uint16 public constant QUORUM = 4;
     /// @notice How long a signed answer stays valid; the callback lands right after it is signed.
     uint32 public constant VALID_FOR_SECONDS = 1 days;
 
-    IIntake public immutable intake;
-    IERC20 public immutable asset;
-    bytes32 public immutable action;
+    IIntake public intake;
+    IERC20 public asset;
+    bytes32 public action;
 
     mapping(bytes32 caseKey => Case) internal cases;
-    mapping(bytes32 requestId => bytes32 caseKey) internal caseOfRequest;
+    mapping(address requestIntake => mapping(bytes32 requestId => bytes32 caseKey)) internal caseOfRequest;
 
     /// @param intake_ The IMD `Intake` on this chain.
     /// @param asset_ The IMD token the intake sells `oracle.request` in on this chain.
     /// @param action_ `bytes32("oracle.request@oracle-1")`, UTF-8 right-padded (not a hash).
     /// @param oracleSigner_ The live attester published by api.imd.fun.
-    constructor(IIntake intake_, IERC20 asset_, bytes32 action_, address oracleSigner_)
+    constructor(address owner_, IIntake intake_, IERC20 asset_, bytes32 action_, address oracleSigner_)
         OracleAttestationConsumer(oracleSigner_)
+        Ownable(owner_)
     {
+        _setOracleConfig(intake_, asset_, action_);
+    }
+
+    /// @notice Changes the protocol used for new requests. Existing requests keep their intake.
+    function setOracleConfig(IIntake intake_, IERC20 asset_, bytes32 action_) external onlyOwner {
+        _setOracleConfig(intake_, asset_, action_);
+    }
+
+    /// @notice Rotates the live attester for all open and future cases, including key revocation.
+    function setSigner(address signer_) external onlyOwner {
+        _setOracleSigner(signer_);
+    }
+
+    function _setOracleConfig(IIntake intake_, IERC20 asset_, bytes32 action_) internal {
         if (address(intake_) == address(0) || address(asset_) == address(0) || action_ == bytes32(0)) {
             revert BadParams();
         }
         intake = intake_;
         asset = asset_;
         action = action_;
+        emit OracleConfigSet(address(intake_), address(asset_), action_);
     }
 
     // ---- ICourt ----
@@ -95,7 +114,9 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
     }
 
     function fee() public view returns (uint256) {
-        return intake.priceOf(action, address(asset));
+        uint256 price = intake.priceOf(action, address(asset));
+        if (price == 0) revert ActionNotSold();
+        return price;
     }
 
     /// @inheritdoc ICourt
@@ -122,16 +143,19 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
             question(formId, formURI, key, targetChainId, target, atBlock, storedValue, claimedValue);
         bytes32 questionHash = OracleQuestion.hash(q);
         bytes memory body = bodyOf(q);
+        IIntake requestIntake = intake;
+        IERC20 requestAsset = asset;
+        bytes32 requestAction = action;
 
         // The fee is pulled from the asker (msg.sender), which approved it for exactly this call.
-        asset.safeTransferFrom(msg.sender, address(this), price);
-        asset.forceApprove(address(intake), price);
-        bytes32 requestId = intake.requestWithFailure(
-            action,
+        requestAsset.safeTransferFrom(msg.sender, address(this), price);
+        requestAsset.forceApprove(address(requestIntake), price);
+        bytes32 requestId = requestIntake.requestWithFailure(
+            requestAction,
             body,
             IIntake.Callback(address(this), this.onOracleResult.selector),
             this.onOracleFailure.selector,
-            address(asset),
+            address(requestAsset),
             price
         );
         cases[caseKey] = Case({
@@ -140,11 +164,12 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
             payer: payer,
             requestId: requestId,
             questionHash: questionHash,
+            requestIntake: address(requestIntake),
             ruling: Ruling.NONE,
             open: true,
             exists: true
         });
-        caseOfRequest[requestId] = caseKey;
+        caseOfRequest[address(requestIntake)][requestId] = caseKey;
         emit CaseOpened(msg.sender, caseId, requestId, payer, questionHash);
     }
 
@@ -161,8 +186,8 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
     function onOracleResult(bytes32 requestId, OracleAttestation.Attestation calldata a, bytes calldata signature)
         external
     {
-        if (msg.sender != address(intake)) revert NotTheIntake();
-        bytes32 caseKey = caseOfRequest[requestId];
+        bytes32 caseKey = caseOfRequest[msg.sender][requestId];
+        if (msg.sender != address(intake) && caseKey == bytes32(0)) revert NotTheIntake();
         Case storage c = cases[caseKey];
         if (!c.open) revert UnknownRequest(requestId);
         if (a.questionHash != c.questionHash) revert WrongQuestion(c.questionHash, a.questionHash);
@@ -172,7 +197,7 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
         _verifyAttestation(a, signature);
         _consume(a.requestId);
         c.open = false;
-        delete caseOfRequest[requestId];
+        delete caseOfRequest[msg.sender][requestId];
         uint256 answer = decodeUint256(a);
         Ruling r = Ruling.NONE;
         if (answer == 1) r = Ruling.STORED;
@@ -185,12 +210,12 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
     /// @notice The failure function: refused body or a panel that did not agree. Unsigned, so it only
     /// closes this contract's own case; the ruling stays `NONE` and `Arms` ends it at `courtDeadline`.
     function onOracleFailure(bytes32 requestId, uint8 status, bytes32 reason, uint16, uint16, bytes calldata) external {
-        if (msg.sender != address(intake)) revert NotTheIntake();
-        bytes32 caseKey = caseOfRequest[requestId];
+        bytes32 caseKey = caseOfRequest[msg.sender][requestId];
+        if (msg.sender != address(intake) && caseKey == bytes32(0)) revert NotTheIntake();
         Case storage c = cases[caseKey];
         if (!c.open) revert UnknownRequest(requestId);
         c.open = false;
-        delete caseOfRequest[requestId];
+        delete caseOfRequest[msg.sender][requestId];
         emit CaseFailed(c.asker, c.caseId, requestId, status, reason);
     }
 
@@ -225,7 +250,7 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
                 " at block ",
                 Strings.toString(atBlock),
                 ", under key number ",
-                Strings.toString(key),
+                Strings.toString(uint256(key) + 1),
                 " of the form with id ",
                 Strings.toHexString(uint256(formId), 32)
             ),
@@ -252,7 +277,15 @@ contract IMDCourt is ICourt, OracleAttestationConsumer {
     function bodyOf(OracleQuestion.Question memory q) public view returns (bytes memory) {
         return OracleQuestion.bodyWith(
             q,
-            bytes.concat(',"consumer":"', bytes(Strings.toHexString(address(this))), '"'),
+            bytes(
+                string.concat(
+                    ',"consumer":{"chainId":',
+                    Strings.toString(block.chainid),
+                    ',"verifyingContract":"',
+                    Strings.toHexString(address(this)),
+                    '"}'
+                )
+            ),
             PANEL_SIZE,
             QUORUM,
             VALID_FOR_SECONDS

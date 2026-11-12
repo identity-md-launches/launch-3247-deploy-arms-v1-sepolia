@@ -22,6 +22,7 @@ contract ArmsHandler is Test {
     address[] public actors;
     uint256[] public jobIds;
     uint256 public initialSupply;
+    uint256 public initialActorFunds;
     bool public violated;
     string public violation;
 
@@ -36,7 +37,10 @@ contract ArmsHandler is Test {
         token = token_;
         court = court_;
         for (uint256 i; i < 8; ++i) {
-            actors.push(makeAddr(string.concat("actor", vm.toString(i))));
+            address actor = makeAddr(string.concat("actor", vm.toString(i)));
+            actors.push(actor);
+            (uint256 bonded,,,,,,,) = arms.arms(actor);
+            initialActorFunds += token.balanceOf(actor) + bonded;
         }
         initialSupply = token.totalSupply();
     }
@@ -369,7 +373,7 @@ contract ArmsInvariantTest is Test {
         for (uint256 i; i < actors.length; ++i) {
             actors[i] = makeAddr(string.concat("actor", vm.toString(i)));
             vm.prank(tokenOwner);
-            token.mint(actors[i], 1000 ether);
+            token.transfer(actors[i], 1000 ether);
             vm.startPrank(actors[i]);
             token.approve(address(arms), type(uint256).max);
             arms.bond(100 ether);
@@ -414,8 +418,17 @@ contract ArmsInvariantTest is Test {
         for (uint256 i; i < handler.actorCount(); ++i) {
             held += token.balanceOf(handler.actors(i));
         }
-        assertLe(held, handler.initialSupply(), "operator ended with more than it began with");
+        assertLe(held, handler.initialActorFunds(), "operator ended with more than it began with");
         assertLe(token.totalSupply(), handler.initialSupply(), "supply only burns");
+    }
+
+    function invariant_supplyEqualsAllHolders() public view {
+        uint256 held = token.balanceOf(tokenOwner) + token.balanceOf(address(arms)) + token.balanceOf(address(court));
+        for (uint256 i; i < handler.actorCount(); ++i) {
+            held += token.balanceOf(handler.actors(i));
+        }
+        assertEq(held, token.totalSupply(), "all unburned tokens are accounted for");
+        assertLe(held, token.INITIAL_SUPPLY());
     }
 
     function invariant_handlerPropertiesHeld() public view {

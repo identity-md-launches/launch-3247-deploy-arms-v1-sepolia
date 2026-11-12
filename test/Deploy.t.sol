@@ -10,11 +10,16 @@ import {ArmsForms} from "../src/ArmsForms.sol";
 
 contract DeployTest is Test {
     function test_deploySepoliaConfig() public {
+        vm.chainId(11155111);
         Deploy d = new Deploy();
         Deploy.Config memory c = d.sepoliaConfig();
         vm.recordLogs();
         (MockToken token, IMDCourt court, Arms arms) = d.deploy(c);
         assertEq(token.owner(), d.SEPOLIA_OWNER(), "token owner is the launch owner, not the deployer");
+        assertEq(token.balanceOf(d.SEPOLIA_OWNER()), token.INITIAL_SUPPLY());
+        assertEq(token.totalSupply(), token.INITIAL_SUPPLY());
+        assertEq(token.balanceOf(address(d)), 0);
+        assertEq(court.owner(), d.SEPOLIA_OWNER());
         assertEq(address(court.intake()), d.SEPOLIA_INTAKE());
         assertEq(address(court.asset()), d.SEPOLIA_IMDTEST());
         assertEq(court.action(), bytes32("oracle.request@oracle-1"));
@@ -49,6 +54,11 @@ contract DeployTest is Test {
         assertLe(address(arms.resultCalculator()).code.length, 24_576);
         assertLe(address(court).code.length, 24_576);
         assertLe(address(token).code.length, 24_576);
+        _assertNoEscapeOpcodes(address(arms));
+        _assertNoEscapeOpcodes(address(court));
+        _assertNoEscapeOpcodes(address(token));
+        _assertNoEscapeOpcodes(address(arms.formRegistry()));
+        _assertNoEscapeOpcodes(address(arms.resultCalculator()));
         assertEq(arms.formRegistry().core(), address(arms));
         // Registration is usable immediately: there is no initializer, wiring or ownership transfer.
         bytes32 form = arms.registerForm(keccak256("launch form"), 1, "ipfs://launch-form");
@@ -64,7 +74,31 @@ contract DeployTest is Test {
         registry.register(keccak256("bypass"), 1, "ipfs://bypass");
     }
 
+    function test_deployRejectsAnotherChain() public {
+        vm.chainId(1);
+        Deploy d = new Deploy();
+        Deploy.Config memory c = d.sepoliaConfig();
+        vm.expectRevert(abi.encodeWithSelector(Deploy.WrongChain.selector, uint256(1)));
+        d.deploy(c);
+    }
+
     function _deployedSig() internal pure returns (string memory) {
         return "Deployed((address,address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256))";
+    }
+
+    /// @dev Same reachable-opcode walk as the supplied Contracts.protected.t.sol floor.
+    function _assertNoEscapeOpcodes(address application) internal view {
+        bytes memory code = application.code;
+        bool reachable = true;
+        for (uint256 i; i < code.length; ++i) {
+            uint8 op = uint8(code[i]);
+            if (op == 0x5b) reachable = true;
+            if (op >= 0x60 && op <= 0x7f) {
+                i += op - 0x5f;
+                continue;
+            }
+            if (reachable) assertTrue(op != 0xf4 && op != 0xf2 && op != 0xff, "forbidden application opcode");
+            if (op == 0x00 || op == 0x56 || op == 0xf3 || op == 0xfd || op == 0xfe || op == 0xff) reachable = false;
+        }
     }
 }

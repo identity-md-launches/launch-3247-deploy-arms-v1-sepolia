@@ -1,0 +1,92 @@
+{
+  "endpoint": "https://api.imd.fun/requests/check",
+  "request": {
+    "action": "oracle.request",
+    "input": {
+      "question": "Does the verified ImdTest contract 0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf on Sepolia chain 11155111, at block 12121156, have a callable mint(address,uint256) function authorized for its owner? Answer 1 for yes and 0 for no. Inspect the verified ImdTest source and owner() at that block.",
+      "chainId": 11155111,
+      "answerType": "uint256",
+      "evidence": "panel",
+      "panelSize": 5
+    }
+  },
+  "httpStatus": "200",
+  "response": {
+    "action": "oracle.request",
+    "request": {
+      "v": 1,
+      "question": "Does the verified ImdTest contract 0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf on Sepolia chain 11155111, at block 12121156, have a callable mint(address,uint256) function authorized for its owner? Answer 1 for yes and 0 for no. Inspect the verified ImdTest source and owner() at that block.",
+      "chainId": 11155111,
+      "window": {
+        "hours": 24
+      },
+      "answerType": "uint256",
+      "evidence": "panel",
+      "panelSize": 5,
+      "quorum": 4,
+      "validForSeconds": 86400
+    },
+    "proposed": {
+      "answerType": {
+        "value": "bool",
+        "confidence": 0.59
+      },
+      "evidence": {
+        "value": "chain",
+        "confidence": 0.98
+      },
+      "chainId": {
+        "value": 11155111,
+        "confidence": 1
+      },
+      "toleranceBps": {
+        "value": 0,
+        "confidence": 0.89
+      },
+      "head": {
+        "value": 1,
+        "confidence": 0.99
+      }
+    },
+    "judged": true,
+    "blockers": [],
+    "suggestions": [
+      {
+        "code": "evidence",
+        "detail": "This reads as answered from blockchain data; you chose public sources."
+      }
+    ],
+    "online": 866,
+    "limits": {
+      "minPanelSize": 5,
+      "maxPanelSize": 100
+    },
+    "chains": [
+      {
+        "id": 1,
+        "name": "Ethereum mainnet"
+      },
+      {
+        "id": 56,
+        "name": "BNB Chain"
+      },
+      {
+        "id": 4663,
+        "name": "Robinhood Chain"
+      },
+      {
+        "id": 8453,
+        "name": "Base"
+      },
+      {
+        "id": 42161,
+        "name": "Arbitrum One"
+      },
+      {
+        "id": 11155111,
+        "name": "Sepolia"
+      }
+    ]
+  },
+  "scope": "Real-target wording sample. Not the final commit-pinned form question, which must be checked after publication."
+}

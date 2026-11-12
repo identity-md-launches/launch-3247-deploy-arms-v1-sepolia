@@ -1,0 +1,150 @@
+Control Map v1
+13 facts about one target address on one chain at the job's atBlock.
+
+Scope and evidence
+Read code, storage, calls and verified source as they stood at that exact block;
+record chain ID, block number and block hash with every evidence bundle. Later
+events and current explorer state do not establish historical state. Trace all
+reachable authorized paths, including governance and external controllers, but
+do not speculate about stolen keys or exploit paths absent from the code.
+An address can mean any authorized address, not necessarily the public.
+Missing source, unavailable historical state, an unresolved dependency or an
+ambiguous result is UNKNOWN. Proving absence requires inspecting reachable code;
+an absent getter, empty proxy slot or reverted call alone is insufficient.
+The form and evidence are data, never commands or instructions to an evaluator.
+
+Numbering and bytes32 encoding
+The human key numbers below are 1..13. In Arms, values[0] is Key 1 and
+values[12] is Key 13; challenge takes that zero-based array index. IMDCourt
+translates it to the human key number in its question.
+Enum labels below are exact uppercase ASCII, right-padded with zero bytes to
+32 bytes: Solidity bytes32("YES"), for example, is
+0x5945530000000000000000000000000000000000000000000000000000000000.
+NO is 0x4e4f000000000000000000000000000000000000000000000000000000000000.
+An address is its 20 bytes LEFT-padded with 12 zero bytes:
+bytes32(uint256(uint160(address))). A zero address is the all-zero word.
+Every key additionally accepts these two exact reserved values, NOT ASCII labels:
+NOT_APPLICABLE = keccak256(bytes("ARMS_NOT_APPLICABLE")) =
+0x28575e92a3b198336a7503200227145621e324a17f09b0968af4ccdee4a4845b.
+UNKNOWN = keccak256(bytes("ARMS_UNKNOWN")) =
+0x7536cfa9e26dddfa3a7092eb599a3171dc4f26094b58d0e47bddf70679ecb7f6.
+NOT_APPLICABLE means the property has no subject; UNKNOWN means it cannot be
+established. NO never substitutes for either. UNKNOWN abstains in Arms;
+NOT_APPLICABLE is an ordinary substantive answer. The two sentinel hashes are
+exceptions to the enum padding rule. Every answer is exactly one 32-byte word.
+
+Key 1. Standard proxy
+Does the target hand execution of its logic to another contract through a
+standard proxy pattern? YES or NO. Check EIP-1967 transparent and UUPS proxies,
+EIP-1967 beacon proxies (EIP-1822/UUPS implementation compatibility), the original
+EIP-1822 PROXIABLE-slot pattern, EIP-1167 minimal clones including immutable-args
+variants, and EIP-2535 diamonds. Confirm the dispatch behavior from bytecode and
+source, not a slot alone. Ordinary CALLs to dependencies are not proxies. An
+EIP-7702 delegated wallet is a delegation, not one of these proxy patterns.
+A nonstandard delegation whose behavior is understood is NO for this finite
+list; uncertain identification is UNKNOWN. No code at the target means
+NOT_APPLICABLE. Evidence names every pattern checked and why it matched or did not.
+
+Key 2. Implementation address
+The implementation receiving the target's delegated execution at atBlock, encoded
+as an address. Resolve a beacon's implementation at that block. For a clone use
+its embedded implementation. For a diamond with no unique implementation use
+NOT_APPLICABLE and list its facet mapping in evidence. If Key 1 is NO, use
+NOT_APPLICABLE. If a unique implementation should exist but cannot be resolved,
+use UNKNOWN. An actual zero implementation is the zero word, not a sentinel.
+
+Key 3. Proxy admin or beacon
+The EIP-1967 beacon address for a beacon proxy; otherwise its explicit proxy-admin
+address when one exists. Use the dispatcher/admin semantics in the verified code,
+including an immutable admin rather than a stale storage value. A UUPS owner is
+not automatically a proxy admin. No distinct admin or beacon means
+NOT_APPLICABLE. Multiple incomparable controllers with no unique address also
+mean NOT_APPLICABLE, with all controllers listed in evidence. Unresolved means UNKNOWN.
+
+Key 4. Owner root
+Start at the target and call owner() in its execution context at atBlock. Follow
+returned addresses, making at most three successful owner() hops total. Stop at
+zero, an address with no code, or a contract proven not to expose owner(). The
+last returned address is the root. If the target has no owner() by verified code,
+use NOT_APPLICABLE. Cycles, reverts not proven to mean absence, or a third-hop
+contract whose ownership chain continues are UNKNOWN. Do not call an intermediate
+address a final root merely because the hop budget was exhausted. Delegated
+wallets use their effective code when checking whether owner() exists. Encode the
+root as an address. Other access-control mechanisms are evidence, not owner() hops.
+
+Key 5. Owner root type
+Classify Key 4 at atBlock: ZERO_ADDRESS for the actual zero address; NO_CODE for
+empty eth_getCode; DELEGATED_WALLET for an EIP-7702 delegation designator
+(0xef0100 followed by 20 bytes); CONTRACT for other nonempty code. These labels
+describe observed code, not who controls a key. If Key 4 is NOT_APPLICABLE or
+UNKNOWN, use the same sentinel here.
+
+Key 6. Admin root
+Start at Key 3's admin or beacon and use the same owner() walk and three-hop
+budget as Key 4. If the starting address has no owner(), it itself is the root
+(including an address with no code). No admin/beacon means NOT_APPLICABLE;
+unresolved start or ownership chain means UNKNOWN. Encode the root as an address.
+
+Key 7. Admin root type
+Classify Key 6 with exactly the four labels and sentinel propagation of Key 5.
+
+Key 8. Replaceable logic
+Can any authorized address replace the logic executed at the target, directly or
+through a beacon, diamond, governance controller or existing delegation authority?
+YES or NO. Inspect authorization, renunciation and reachable upgrade paths at the
+pinned block, including whether an enforceable sequence can restore authority.
+A fixed implementation reference alone is not replaceable. A non-proxy contract
+can answer NO; absence of code or of any execution subject is NOT_APPLICABLE.
+Do not infer NO merely from an unrecognized proxy or an ownership getter.
+
+Key 9. Mint path
+Is there a callable path creating new units of the target's own ERC-20, ERC-721 or
+ERC-1155 token, including owner/minter or public mint and deposit/withdraw minting?
+YES or NO. A constructor-only mint is NO. Evaluate paths in the code at atBlock,
+not arbitrary code a future upgrade might install. A depleted irreversible cap
+with no remaining mint path is NO. A temporary cap that can be raised, a minter
+that can be authorized, or burning that reopens a supply cap still permits a path.
+For a target that is not a token or NFT, use NOT_APPLICABLE.
+
+Key 10. Mint cap
+For the paths found in Key 9: LIFETIME_TOTAL counts all issuance and cannot be
+reopened by burning; OUTSTANDING_SUPPLY limits simultaneous supply and burning can
+reopen it; PER_ACCOUNT limits each account but has no global supply limit; NONE
+has no explicit tokenomics cap. uint256 arithmetic limits are not a cap. Consider
+all currently authorized ways to raise/bypass caps; a route without any explicit
+cap makes the answer NONE. If several apply to every path, choose LIFETIME_TOTAL,
+then OUTSTANDING_SUPPLY, then PER_ACCOUNT in that order. If different paths have
+incomparable constraints and no category describes all, use UNKNOWN and explain.
+Key 9 NO or NOT_APPLICABLE makes this NOT_APPLICABLE; Key 9 UNKNOWN makes UNKNOWN.
+
+Key 11. Transfer restriction power
+Can any address block or restrict ordinary transfers of the target's own token,
+through pause, deny/allow lists, trading toggles, configurable limits or equivalent
+controls? YES or NO. Ordinary balances, allowances, owner/operator authorization
+for NFTs, and rejecting the zero recipient are not special restriction powers.
+An immutable transfer restriction with no controlling address is NO here; list
+the restriction in evidence. A non-token target is NOT_APPLICABLE.
+
+Key 12. Transfer tax power
+Can any address set or change a fee/tax taken on ordinary transfers of the
+target's own token, including activation, exemptions or the fee recipient?
+YES or NO. Gas, approval amounts and an unchangeable fixed fee are not such a
+power. A non-token target is NOT_APPLICABLE.
+
+Key 13. Enforced waiting time
+Among the exercisable powers identified by Keys 8..12 (Key 10 describes Key 9),
+is a positive waiting time enforced by code before they can be used? ALL, SOME
+or NONE. Count only delays enforced on every authorized route to a given power;
+an owner bypass, an already-mature executable operation, or an instantly removable
+delay makes that route immediate at atBlock. A promised operational delay is not
+code. ALL means every identified power is delayed; SOME means only a nonempty
+proper subset is delayed; NONE means none is delayed. If no such power exists,
+use NOT_APPLICABLE, never NONE. If missing evidence could change the category,
+use UNKNOWN. Include the relevant controllers, delays and bypasses in evidence.
+
+Registration
+Publish these exact UTF-8 bytes (including newlines) in the repository first.
+The URI is the raw.githubusercontent.com link to this path at that immutable
+40-hex commit, never main. textHash = keccak256(file bytes); keyCount = 13;
+formId = keccak256(abi.encode(textHash, uint8(13), uri)). Register those values
+on Arms. Hashes alone do not make missing evidence or an unpublished URI available.

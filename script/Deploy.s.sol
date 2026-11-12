@@ -13,6 +13,8 @@ import {MockToken} from "../src/mocks/MockToken.sol";
 /// (see README "Launch"). This script rehearses the same deployment on a local node: `run()` reads
 /// no environment and takes its configuration from `sepoliaConfig()`.
 contract Deploy is Script {
+    error WrongChain(uint256 chainId);
+
     struct Config {
         address tokenOwner;
         address intake;
@@ -24,7 +26,7 @@ contract Deploy is Script {
         uint256 maxTotalBonded;
     }
 
-    /// @dev The launch's owner for the mock token's minting role (the only role in the system).
+    /// @dev The launch's owner for the token distribution and oracle configuration.
     address public constant SEPOLIA_OWNER = 0xCC4E8639884d08033597DeF041f966E8bE5BC514;
     address public constant SEPOLIA_INTAKE = 0xa43e6F75ee006411F79Ac1C84120606C2330DE82;
     address public constant SEPOLIA_IMDTEST = 0x56bcf2a5F47710649A4091219Ef0b56e2d1B58BF;
@@ -59,8 +61,9 @@ contract Deploy is Script {
     }
 
     function deploy(Config memory c) public returns (MockToken token, IMDCourt court, Arms arms) {
+        if (block.chainid != 11155111) revert WrongChain(block.chainid);
         token = new MockToken(c.tokenOwner);
-        court = new IMDCourt(IIntake(c.intake), IERC20(c.imd), c.action, c.oracleSigner);
+        court = new IMDCourt(c.tokenOwner, IIntake(c.intake), IERC20(c.imd), c.action, c.oracleSigner);
         Arms.Params memory p = armsParams(c, address(token), address(court));
         arms = new Arms(
             p.token,

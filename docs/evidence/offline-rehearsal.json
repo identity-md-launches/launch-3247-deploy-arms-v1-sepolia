@@ -1,0 +1,27 @@
+{
+  "status": "offline-simulation-only",
+  "test": "IMDCourtTest.test_controlMapTwoRoundsAndChallengeAccounting",
+  "command": "forge test --offline --match-test test_controlMapTwoRoundsAndChallengeAccounting -vvvv",
+  "callbackGasInThisTrace": 57622,
+  "mockCallbackStipend": 200000,
+  "observedSepoliaCallbackStipend": 1000000,
+  "liveCallbackGas": null,
+  "liveRulingDurationSeconds": null,
+  "transactionHashes": [],
+  "warning": "The callback is signed by a public local test key and delivered by MockIntake. This is not a real oracle ruling or Sepolia transaction.",
+  "resolveAmountsARMT": {
+    "slashed": "20000000000000000000",
+    "posterRefund": "2000000000000000000",
+    "challengerReward": "5400000000000000000",
+    "stakeReturned": "2000000000000000000",
+    "burned": "12600000000000000000"
+  },
+  "assertedEvents": [
+    "two Slashed events of 10 ARMT",
+    "Transfer to poster for actual spent escrow",
+    "RewardPaid to challenger",
+    "Transfer returning challenger stake",
+    "Transfer to zero for burn",
+    "Resolved with CLAIMED"
+  ]
+}

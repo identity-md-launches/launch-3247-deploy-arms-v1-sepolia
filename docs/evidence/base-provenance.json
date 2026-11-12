@@ -1,0 +1,22 @@
+{
+  "sourceRepo": "https://github.com/identity-md-launches/launch-3241-build-test-deploy-sepolia",
+  "commitApi": "https://api.github.com/repos/identity-md-launches/launch-3241-build-test-deploy-sepolia/commits/main",
+  "mergedMainCommit": "6afdcba7c3e53da390012c2e54a9b03aa6fe0f79",
+  "jobApi": "https://api.imd.fun/jobs/4b3cfe61-1fc8-4a42-a97d-c31245fe3f52",
+  "jobId": "4b3cfe61-1fc8-4a42-a97d-c31245fe3f52",
+  "jobState": "completed",
+  "launch": {
+    "requested": false,
+    "kind": null,
+    "id": null,
+    "status": null,
+    "chainId": null
+  },
+  "delivery": {
+    "repoUrl": "https://github.com/identity-md-launches/launch-3241-build-test-deploy-sepolia",
+    "pullRequestUrl": "https://github.com/identity-md-launches/launch-3241-build-test-deploy-sepolia/pull/1",
+    "commit": "6afdcba7c3e53da390012c2e54a9b03aa6fe0f79",
+    "deliveredAt": "2026-11-12T18:55:45.703Z",
+    "media": null
+  }
+}

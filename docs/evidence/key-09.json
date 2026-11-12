@@ -1,0 +1,20 @@
+{
+  "humanKey": 9,
+  "armsIndex": 8,
+  "chainId": 11155111,
+  "target": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+  "atBlock": 12121156,
+  "blockHash": "0x86bdfba226ef1b0847d1ba569407291985629896f3b91afb2cc7e2abbcae3da8",
+  "answer": "YES",
+  "bytes32": "0x5945530000000000000000000000000000000000000000000000000000000000",
+  "reason": "ImdTest.mint(address,uint256) and mintBatch(address[],uint256[]) call inherited ERC20._mint. onlyMinter permits the nonzero owner or authorized minters. The owner exists at the pinned block and there is no irreversible exhausted cap. This is a source-based callable capability, not a claim that a mint transaction was sent.",
+  "sources": [
+    "https://eth-sepolia.blockscout.com/api/v2/smart-contracts/0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+    "https://ethereum-sepolia-rpc.publicnode.com"
+  ],
+  "localEvidence": [
+    "sepolia-readback.json",
+    "ImdTest-verified-source.json"
+  ],
+  "verificationLimitation": "Blockscout reports verified source with a partial compilation match (not full metadata verification); deployed runtime bytes match the pinned-block RPC result. No real Arms check has been posted."
+}

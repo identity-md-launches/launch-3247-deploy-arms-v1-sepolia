@@ -221,6 +221,8 @@ contract Arms {
     uint256 internal constant BPS = 10_000;
     /// @dev `Number.MAX_SAFE_INTEGER`: the largest block number the court's question can carry.
     uint256 internal constant MAX_BLOCK = 9_007_199_254_740_991;
+    /// @dev The oracle accepts an absolute window only when its closing block is five deep.
+    uint256 public constant MIN_BLOCK_DEPTH = 5;
 
     IBurnableToken public immutable token;
     ICourt public immutable court;
@@ -437,6 +439,8 @@ contract Arms {
         if (feePerArm < minFeePerArm) revert FeeTooLow();
         if (!chainAllowed(targetChainId)) revert ChainNotAllowed();
         if (target == address(0) || atBlock == 0 || atBlock > MAX_BLOCK) revert BadTarget();
+        uint256 postedBlock = Blocks.number(arbitrumBlocks);
+        if (targetChainId == block.chainid && atBlock + MIN_BLOCK_DEPTH > postedBlock) revert BadTarget();
         jobId = ++jobCount;
         Job storage j = jobs[jobId];
         j.formId = formId;
@@ -447,7 +451,7 @@ contract Arms {
         j.poster = msg.sender;
         j.keyCount = keyCount;
         j.escrow = 3 * feePerArm;
-        j.postedBlock = Blocks.number(arbitrumBlocks);
+        j.postedBlock = postedBlock;
         j.serverCount = serverCount;
         _reopen(j, Phase.OPEN);
         totalEscrow += j.escrow;

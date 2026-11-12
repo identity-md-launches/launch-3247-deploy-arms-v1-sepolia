@@ -1,0 +1,40 @@
+{
+  "kind": "evm_contracts",
+  "contracts": [
+    {
+      "contract": "MockToken",
+      "constructorArgs": [
+        "$owner"
+      ]
+    },
+    {
+      "contract": "IMDCourt",
+      "constructorArgs": [
+        "$owner",
+        "0xa43e6f75ee006411f79ac1c84120606c2330de82",
+        "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+        "0x6f7261636c652e72657175657374406f7261636c652d31000000000000000000",
+        "0x5598aa9146215bc13eb26f2c692ad1461fd32982"
+      ]
+    },
+    {
+      "contract": "Arms",
+      "constructorArgs": [
+        "$contract:MockToken",
+        "$contract:IMDCourt",
+        "1000000000000000000",
+        "1000000000000000000000",
+        "100000000000000000000000",
+        "10",
+        "1000",
+        "3000",
+        "21600",
+        "7200",
+        "604800",
+        "604800",
+        "1209600"
+      ]
+    }
+  ],
+  "notes": "Sepolia Arms v1: MockToken premints 1,000,000 ARMT to the launch owner and permits only holder self-burns; it has no post-launch mint or burnFrom. IMDCourt takes the launch owner for oracle configuration migration, authenticates callbacks against each request intake, verifies the current signer and pins one-based form questions. Arms remains ownerless and creates ArmsForms and ArmsResults internally; local-chain questions must be at least five blocks deep. Other-chain heads still require operator verification. The immutable README fees, caps and windows are preserved. Intake, imdTEST, live attester, 0.5 imdTEST sale and 1,000,000-gas callback limit were checked through public docs/API and Sepolia reads; recheck at launch. No deployment, registration, paid oracle ruling or source verification for this release has occurred in the worker task."
+}

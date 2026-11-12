@@ -40,7 +40,9 @@ contract OracleConsumerConformanceTest is Test {
         token = new MockToken(address(this));
         intake = new MockIntake(WRITER, makeAddr("treasury"), ACTION, address(token), 0.5 ether);
         deployCodeTo(
-            "IMDCourt.sol:IMDCourt", abi.encode(address(intake), address(token), ACTION, SIGNER), VECTOR_CONSUMER
+            "IMDCourt.sol:IMDCourt",
+            abi.encode(address(this), address(intake), address(token), ACTION, SIGNER),
+            VECTOR_CONSUMER
         );
         consumer = IMDCourt(VECTOR_CONSUMER);
     }
@@ -103,7 +105,6 @@ contract OracleConsumerConformanceTest is Test {
     /// @notice A fresh signature from the vector key, over the court's own question, settles a case
     /// delivered the way the writer delivers it.
     function test_acceptsAFreshSignatureFromTheVectorKey() public {
-        token.mint(address(this), 1 ether);
         token.approve(address(consumer), 0.5 ether);
         consumer.ask(
             keccak256("case"),

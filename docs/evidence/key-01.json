@@ -1,0 +1,20 @@
+{
+  "humanKey": 1,
+  "armsIndex": 0,
+  "chainId": 11155111,
+  "target": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+  "atBlock": 12121156,
+  "blockHash": "0x86bdfba226ef1b0847d1ba569407291985629896f3b91afb2cc7e2abbcae3da8",
+  "answer": "NO",
+  "bytes32": "0x4e4f000000000000000000000000000000000000000000000000000000000000",
+  "reason": "ImdTest inherits ERC20 and Ownable2Step, and its complete verified source/imports contain no proxy dispatcher or delegatecall. The runtime returned at the pinned block matches Blockscout. EIP-1967 implementation/admin/beacon slots are zero. Source excludes transparent/UUPS/EIP-1822, beacon, EIP-1167 clones (including immutable args) and EIP-2535 diamond dispatch; empty slots alone were not used as proof.",
+  "sources": [
+    "https://eth-sepolia.blockscout.com/api/v2/smart-contracts/0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+    "https://ethereum-sepolia-rpc.publicnode.com"
+  ],
+  "localEvidence": [
+    "sepolia-readback.json",
+    "ImdTest-verified-source.json"
+  ],
+  "verificationLimitation": "Blockscout reports verified source with a partial compilation match (not full metadata verification); deployed runtime bytes match the pinned-block RPC result. No real Arms check has been posted."
+}

@@ -1,11 +1,50 @@
 #!/usr/bin/env python3
-"""Check built launch artifacts offline; run after forge build. Does not write a manifest."""
+"""Validate the manifest against the supplied evm_contracts reference and built ABIs offline."""
 import json
 from pathlib import Path
 import re
 
 CONTRACTS = ("Arms", "ArmsForms", "ArmsResults", "IMDCourt", "MockCourt", "MockToken", "MockIntake")
 ROOT = Path(__file__).resolve().parents[1]
+manifest = json.loads((ROOT / "launch.json").read_text())
+assert set(manifest) == {"kind", "contracts", "notes"}
+assert manifest["kind"] == "evm_contracts"
+assert isinstance(manifest["notes"], str) and manifest["notes"]
+assert 1 <= len(manifest["contracts"]) <= 8
+seen = set()
+for entry in manifest["contracts"]:
+    assert set(entry) == {"contract", "constructorArgs"}
+    name = entry["contract"]
+    assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", name)
+    assert name not in seen and name != "MerkleDistributor"
+    artifact = json.loads((ROOT / "out" / f"{name}.sol" / f"{name}.json").read_text())
+    constructor = next(x for x in artifact["abi"] if x["type"] == "constructor")
+    assert len(entry["constructorArgs"]) == len(constructor["inputs"])
+    for value, abi in zip(entry["constructorArgs"], constructor["inputs"]):
+        assert isinstance(value, str)
+        kind = abi["type"]
+        if value == "$owner":
+            assert kind == "address"
+        elif value.startswith("$contract:"):
+            assert kind == "address" and value.split(":", 1)[1] in seen
+        elif kind == "address":
+            assert re.fullmatch(r"0x[0-9a-f]{40}", value) and int(value, 16) != 0
+        elif kind == "bytes32":
+            assert re.fullmatch(r"0x[0-9a-f]{64}", value)
+        else:
+            assert kind.startswith("uint") and re.fullmatch(r"0|[1-9][0-9]*", value)
+            assert int(value) < 2 ** int(kind[4:])
+    seen.add(name)
+assert [x["contract"] for x in manifest["contracts"]] == ["MockToken", "IMDCourt", "Arms"]
+snapshot = json.loads((ROOT / "docs/evidence/sepolia-readback.json").read_text())
+assert manifest["contracts"][1]["constructorArgs"] == [
+    "$owner", snapshot["network"]["intake"], snapshot["network"]["asset"],
+    next(a["actionId"] for a in snapshot["network"]["actions"] if a["action"] == "oracle.request"),
+    snapshot["attester"]]
+assert manifest["contracts"][2]["constructorArgs"] == [
+    "$contract:MockToken", "$contract:IMDCourt", "1000000000000000000", "1000000000000000000000",
+    "100000000000000000000000", "10", "1000", "3000", "21600", "7200", "604800", "604800", "1209600"]
+print("Manifest: exact fields, deploy order, backward address references, live-source parameters and ABI words passed")
 for name in CONTRACTS:
     artifact = json.loads((ROOT / "out" / f"{name}.sol" / f"{name}.json").read_text())
     constructors = [entry for entry in artifact["abi"] if entry["type"] == "constructor"]

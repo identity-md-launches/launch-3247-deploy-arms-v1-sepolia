@@ -1,0 +1,20 @@
+{
+  "humanKey": 11,
+  "armsIndex": 10,
+  "chainId": 11155111,
+  "target": "0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+  "atBlock": 12121156,
+  "blockHash": "0x86bdfba226ef1b0847d1ba569407291985629896f3b91afb2cc7e2abbcae3da8",
+  "answer": "NO",
+  "bytes32": "0x4e4f000000000000000000000000000000000000000000000000000000000000",
+  "reason": "ImdTest does not override ERC20 transfers/_update or introduce pause, blacklist, trading toggles or configurable limits. Its only special privilege is mint/minter administration; ordinary balances, zero-address checks and allowances are excluded by the form.",
+  "sources": [
+    "https://eth-sepolia.blockscout.com/api/v2/smart-contracts/0x56bcf2a5f47710649a4091219ef0b56e2d1b58bf",
+    "https://ethereum-sepolia-rpc.publicnode.com"
+  ],
+  "localEvidence": [
+    "sepolia-readback.json",
+    "ImdTest-verified-source.json"
+  ],
+  "verificationLimitation": "Blockscout reports verified source with a partial compilation match (not full metadata verification); deployed runtime bytes match the pinned-block RPC result. No real Arms check has been posted."
+}
