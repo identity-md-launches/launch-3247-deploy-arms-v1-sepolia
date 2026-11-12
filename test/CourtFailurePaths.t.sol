@@ -19,6 +19,7 @@ contract CourtFailurePathsTest is ArmsBase {
     uint256 constant PRICE = 0.5 ether;
     uint256 constant SIGNER_KEY = 0xB0B5;
     address constant WRITER = address(0x717E);
+    uint256 constant HEAD = 20_000_000;
 
     MockToken feeToken;
     MockIntake intake;
@@ -31,6 +32,10 @@ contract CourtFailurePathsTest is ArmsBase {
         intake = new MockIntake(WRITER, treasury, ACTION, address(feeToken), PRICE);
         imdCourt =
             new IMDCourt(tokenOwner, IIntake(address(intake)), IERC20(address(feeToken)), ACTION, vm.addr(SIGNER_KEY));
+        // The fixture runs on chain 31337, so Sepolia is a remote target: the court must publish a
+        // confirmed head for it before Arms admits any post about it.
+        vm.prank(tokenOwner);
+        imdCourt.setConfirmedHead(CHAIN, HEAD);
         arms = _wire(imdCourt);
         vm.prank(tokenOwner);
         feeToken.transfer(challenger, 100 ether);
@@ -150,6 +155,37 @@ contract CourtFailurePathsTest is ArmsBase {
         assertEq(feeToken.balanceOf(treasury), PRICE + 1);
         assertEq(feeToken.balanceOf(address(arms)), 0);
         assertEq(feeToken.allowance(address(arms), address(imdCourt)), 0);
+    }
+
+    /// A remote target is only admitted at least MIN_BLOCK_DEPTH below the head the production court
+    /// published; a fresh court with no head refuses every remote post, and nothing is escrowed.
+    function test_remoteTargetNeedsAPublishedConfirmedHead() public {
+        uint256 depth = arms.MIN_BLOCK_DEPTH();
+        uint256 escrowBefore = arms.totalEscrow();
+        vm.startPrank(poster);
+        vm.expectRevert(Arms.BadTarget.selector);
+        arms.post(formId, CHAIN, target, HEAD - depth + 1, FEE);
+        vm.expectRevert(Arms.BadTarget.selector);
+        arms.post(formId, CHAIN, target, HEAD, FEE);
+        vm.stopPrank();
+        assertEq(arms.totalEscrow(), escrowBefore, "a refused post escrows nothing");
+        vm.prank(poster);
+        arms.post(formId, CHAIN, target, HEAD - depth, FEE);
+
+        // A second court that never published a head: every remote post is refused.
+        IMDCourt fresh =
+            new IMDCourt(tokenOwner, IIntake(address(intake)), IERC20(address(feeToken)), ACTION, vm.addr(SIGNER_KEY));
+        Arms other = _wire(fresh);
+        vm.prank(poster);
+        token.approve(address(other), type(uint256).max);
+        vm.prank(poster);
+        vm.expectRevert(Arms.BadTarget.selector);
+        other.post(formId, CHAIN, target, 1, FEE);
+        // Only the owner publishes, and a stranger's attempt leaves the gate shut.
+        vm.prank(makeAddr("head-stranger"));
+        vm.expectRevert();
+        fresh.setConfirmedHead(CHAIN, HEAD);
+        assertEq(fresh.confirmedHead(CHAIN), 0);
     }
 
     function test_unsupportedTargetChainsRefusedByArmsAndCourt() public {
