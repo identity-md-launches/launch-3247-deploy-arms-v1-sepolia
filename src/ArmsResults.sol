@@ -10,6 +10,7 @@ interface IArmsResultsSource {
     function answerOf(uint256 id, address arm, uint8 key) external view returns (bytes32);
     function results(uint256 id, uint8 key) external view returns (bytes32, Arms.Status);
     function entries(uint256 id, address arm) external view returns (bytes32, bool, bool, string memory);
+    function slashedIn(uint256 id, address arm) external view returns (bool);
 }
 
 /// @title Read-only verdict and payment calculation
@@ -65,6 +66,25 @@ contract ArmsResults {
             o.payments[i] = j.feePerArm * o.payments[i] / j.keyCount;
         }
         if (withTie && j.disputedCount > 0) o.tiePayment = j.feePerArm * tieCorrect / j.disputedCount;
+    }
+
+    /// @notice The voters of job `id` that gave `value` on `key` and have not been slashed in this job.
+    /// The tie breaker counts only on a key it was drawn for. Used for a slash and for a stake split.
+    function givers(uint256 id, uint8 key, bytes32 value) external view returns (address[] memory list) {
+        IArmsResultsSource source = IArmsResultsSource(msg.sender);
+        Arms.Job memory j = source.jobs(id);
+        address[] memory voters = source.armsOf(id);
+        uint256 n = voters.length;
+        bool tie = j.tieBreaker != address(0) && j.disputedMask & (uint32(1) << key) != 0;
+        list = new address[](n + (tie ? 1 : 0));
+        uint256 g;
+        for (uint256 i; i < list.length; ++i) {
+            address a = i < n ? voters[i] : j.tieBreaker;
+            if (!source.slashedIn(id, a) && source.answerOf(id, a, key) == value) list[g++] = a;
+        }
+        assembly ("memory-safe") {
+            mstore(list, g)
+        }
     }
 
     function verdict(uint256 id) external view returns (Arms.Verdict memory v) {

@@ -26,6 +26,11 @@ interface ICourt {
     /// @notice Whether this court accepts questions about the target chain.
     function supportsChain(uint256 chainId) external view returns (bool);
 
+    /// @notice The highest block of a remote target chain the court can vouch for as confirmed; zero
+    /// when it has published none. `Arms` only admits a remote `atBlock` at least five blocks below it,
+    /// so every question it later asks names a window the oracle can read.
+    function confirmedHead(uint256 chainId) external view returns (uint256);
+
     /// @notice Opens a case. Reverts if the fee is above `maxFee` or the case exists for this asker.
     function ask(
         bytes32 caseId,

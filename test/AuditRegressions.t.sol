@@ -141,22 +141,35 @@ contract AuditRegressionsTest is ArmsBase {
         _balanced();
     }
 
+    /// @dev Revised with finding 27019183: a change that makes an arm newly eligible (here a cancelled
+    /// exit, and a fee cut) still cannot join an older job, while an already eligible arm's top-up in
+    /// the posting block neither joins nor leaves it (test/RevisionRegressions.t.sol covers the latter).
     function test_audit2_stateChangeInPostingBlockOrAfterExcludesOldJob() public {
+        for (uint256 i; i < armSet.length; ++i) {
+            vm.prank(armSet[i]);
+            arms.requestExit();
+        }
         uint256 id = _post();
         for (uint256 i; i < armSet.length; ++i) {
             vm.prank(armSet[i]);
-            arms.bond(1);
+            arms.bond(1); // cancels the exit in the posting block
+            assertEq(arms.lastStateChange(armSet[i]), _job(id).postedBlock);
         }
         vm.roll(vm.getBlockNumber() + 2);
         arms.draw(id);
-        assertEq(arms.armsOf(id).length, 0, "same-block mutation is excluded");
-        uint256 next = _kind(false, FEE);
+        assertEq(arms.armsOf(id).length, 0, "an exit cancelled in the posting block cannot join");
+        for (uint256 i; i < armSet.length; ++i) {
+            vm.prank(armSet[i]);
+            arms.serve(formId, 2 * FEE);
+        }
+        uint256 next = _post();
         for (uint256 i; i < armSet.length; ++i) {
             vm.prank(armSet[i]);
             arms.serve(formId, FEE);
         }
+        vm.roll(vm.getBlockNumber() + 2);
         arms.draw(next);
-        assertEq(arms.armsOf(next).length, 0, "post-seed fee update cannot join");
+        assertEq(arms.armsOf(next).length, 0, "post-seed fee cut cannot join");
         uint256 later = _pair();
         assertEq(arms.armsOf(later).length, 2);
     }

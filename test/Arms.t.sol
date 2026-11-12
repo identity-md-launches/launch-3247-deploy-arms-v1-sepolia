@@ -781,7 +781,9 @@ contract ArmsTest is ArmsBase {
         assertEq(arms.totalStakes(), 0);
     }
 
-    function test_resolve_storedAfterOverturnReturnsStake() public {
+    /// @dev A STORED ruling forfeits the stake whatever happened on other keys. Here both arms were
+    /// slashed on key 0, so no unslashed giver of key 1 remains and the stake burns.
+    function test_resolve_storedAfterOverturnBurnsStakeWhenEveryGiverWasSlashed() public {
         (uint256 id,) = _settledJob();
         bytes32 c1 = _challenge(id, 0, keccak256("k0"));
         bytes32 c2 = _challenge(id, 1, keccak256("k1"));
@@ -789,8 +791,11 @@ contract ArmsTest is ArmsBase {
         _rule(c2, ICourt.Ruling.STORED);
         arms.resolve(id, 0, keccak256("k0"));
         uint256 chBefore = token.balanceOf(challenger);
+        uint256 supplyBefore = token.totalSupply();
         arms.resolve(id, 1, keccak256("k1"));
-        assertEq(token.balanceOf(challenger) - chBefore, STAKE, "stake back once the job is overturned");
+        assertEq(token.balanceOf(challenger), chBefore, "a challenger ruled wrong keeps no stake");
+        assertEq(supplyBefore - token.totalSupply(), STAKE, "with no unslashed giver the stake burns");
+        assertEq(arms.totalStakes(), 0);
     }
 
     function test_resolve_noRulingAfterCourtDeadline() public {

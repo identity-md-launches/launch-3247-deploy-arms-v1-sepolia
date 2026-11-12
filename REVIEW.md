@@ -94,10 +94,12 @@ informational; no test asserts an exact gas value.
    real check, and the deliberate wrong-Key-9 real oracle challenge. Consequently live callback
    gas, elapsed ruling time, transaction hashes and actual slash/refund/reward/burn logs are absent.
    The README gives the exact operator handoff and expected accounting; it does not mark these done.
-3. Imported future-block finding: fixed for local-chain targets, including ArbSys heights. A remote
-   target chain's confirmed head still cannot be authenticated by this local contract. Remote
-   head validation remains an operator/reader responsibility; an unanswerable remote window can
-   still result in a failed challenge with the original verdict unchanged.
+3. Imported future-block finding: fixed for local-chain targets, including ArbSys heights, and in
+   this revision for remote targets too: `Arms.post` bounds a remote `atBlock` by the court's
+   `confirmedHead`, which is zero (nothing admitted) until the court owner publishes one with
+   `setConfirmedHead`. The head is the owner's word, not a light client: a stale head delays remote
+   posts, and a head set above the real chain would readmit the original problem, so the owner must
+   publish only heights it has confirmed. Publishing one for 4663 is an operator step after launch.
 4. The new court owner can change oracle trust anchors. A dishonest owner can select a dishonest
    attester, so this is explicitly trusted administration outside the ownerless core. Immediate
    signer revocation can invalidate signatures already produced but not yet delivered. Existing

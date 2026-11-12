@@ -250,9 +250,10 @@ contract Arms {
     // ---- storage ----
 
     mapping(address => ArmInfo) public arms;
-    // Positive eligibility changes invalidate older snapshots. Exit and stop are prospective:
-    // their job cutoffs are checked separately so they cannot opt out of an existing job,
-    // even when the job and exit/stop share a block.
+    // Changes that make an arm newly eligible (first activation, a cancelled exit, reactivation) and
+    // penalties (strikes, slashes) invalidate older snapshots. Everything else is prospective by job
+    // id: a bond top-up, a serve, a fee change, an exit or a stop apply to jobs posted after them and
+    // never to a job whose draw seed may already be visible. The registry keeps the per-job history.
     mapping(address => uint256) public lastStateChange;
     mapping(address => uint256) public exitAfterJob;
     uint256 public totalBonded;
@@ -342,13 +343,18 @@ contract Arms {
         if (amount == 0) revert ZeroAmount();
         ArmInfo storage a = arms[msg.sender];
         if (a.bond + amount > maxBondPerArm || totalBonded + amount > maxTotalBonded) revert BondCap();
+        // Only a top-up that makes the arm newly active (first bond above `minBond`, a cancelled exit)
+        // invalidates older jobs. An already active arm's top-up counts for later jobs only, so it
+        // can neither opt in to nor opt out of a job whose seed is already visible.
+        bool wasActive = isActive(msg.sender);
         a.bond += amount;
-        lastStateChange[msg.sender] = Blocks.number(arbitrumBlocks);
+        if (!wasActive) lastStateChange[msg.sender] = Blocks.number(arbitrumBlocks);
         totalBonded += amount;
         if (a.exiting) {
             a.exiting = false;
             a.exitAt = 0;
         }
+        _checkpointBond(msg.sender);
         _pull(msg.sender, amount);
         emit Bonded(msg.sender, amount, a.bond);
     }
@@ -373,6 +379,7 @@ contract Arms {
         a.bond -= amount;
         lastStateChange[msg.sender] = Blocks.number(arbitrumBlocks);
         totalBonded -= amount;
+        _checkpointBond(msg.sender);
         _send(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
@@ -414,10 +421,11 @@ contract Arms {
         emit FormRegistered(formId, keyCount, uri);
     }
 
+    /// @notice Lists the arm for the form, or changes its fee, for jobs posted from now on. Jobs already
+    /// posted keep seeing the fee (or the absence) the arm advertised when they were posted.
     function serve(bytes32 formId, uint256 minFee) external {
         if (arms[msg.sender].bond < minBond) revert InsufficientBond();
-        formRegistry.serve(formId, msg.sender, minFee);
-        lastStateChange[msg.sender] = Blocks.number(arbitrumBlocks);
+        formRegistry.serve(formId, msg.sender, minFee, jobCount);
         emit Serving(formId, msg.sender, minFee);
     }
 
@@ -440,7 +448,11 @@ contract Arms {
         if (!chainAllowed(targetChainId)) revert ChainNotAllowed();
         if (target == address(0) || atBlock == 0 || atBlock > MAX_BLOCK) revert BadTarget();
         uint256 postedBlock = Blocks.number(arbitrumBlocks);
-        if (targetChainId == block.chainid && atBlock + MIN_BLOCK_DEPTH > postedBlock) revert BadTarget();
+        // `atBlock` must be at least MIN_BLOCK_DEPTH below a head this chain can vouch for: its own
+        // height for a local target, the court's published confirmed head for a remote one (zero until
+        // the court publishes one, so a remote target without a head is refused).
+        uint256 head = targetChainId == block.chainid ? postedBlock : court.confirmedHead(targetChainId);
+        if (atBlock + MIN_BLOCK_DEPTH > head) revert BadTarget();
         jobId = ++jobCount;
         Job storage j = jobs[jobId];
         j.formId = formId;
@@ -532,7 +544,7 @@ contract Arms {
         if (tie) {
             j.phase = Phase.TIE_REVEAL;
             j.deadline = uint64(block.timestamp + revealWindow);
-        } else if (_allCommitted(jobId, j)) {
+        } else if (_count(jobId, false) == jobArms[jobId].length) {
             j.phase = Phase.REVEAL;
             j.deadline = uint64(block.timestamp + revealWindow);
         }
@@ -577,10 +589,7 @@ contract Arms {
         if (j.phase == Phase.COMMIT || j.phase == Phase.REVEAL) {
             bool needReveal = j.phase == Phase.REVEAL;
             if (needReveal) {
-                uint256 revealed;
-                for (uint256 k; k < jobArms[jobId].length; ++k) {
-                    if (entries[jobId][jobArms[jobId][k]].revealed) ++revealed;
-                }
+                uint256 revealed = _count(jobId, true);
                 if (revealed == jobArms[jobId].length) revert NotPending();
                 if (revealed != 0) {
                     _closeNoShow(jobId, j);
@@ -615,13 +624,16 @@ contract Arms {
         }
     }
 
+    /// @dev Voter `i` of a job: a main arm, then the tie breaker if one was drawn.
+    function _voter(uint256 jobId, Job storage j, uint256 i) internal view returns (address) {
+        return i < jobArms[jobId].length ? jobArms[jobId][i] : j.tieBreaker;
+    }
+
     function _closeNoShow(uint256 jobId, Job storage j) internal {
-        uint256 n = jobArms[jobId].length;
-        uint256 voters = n + (j.tieBreaker != address(0) ? 1 : 0);
+        uint256 voters = jobArms[jobId].length + (j.tieBreaker != address(0) ? 1 : 0);
         uint256 revealed;
         for (uint256 i; i < voters; ++i) {
-            address a = i < n ? jobArms[jobId][i] : j.tieBreaker;
-            if (entries[jobId][a].revealed) ++revealed;
+            if (entries[jobId][_voter(jobId, j, i)].revealed) ++revealed;
         }
         uint256 missing = voters - revealed;
         uint256 compensation = revealed * j.feePerArm;
@@ -629,13 +641,14 @@ contract Arms {
         uint256 dust = compensation % missing;
         uint256 tranche = trancheMultiple * j.feePerArm;
         for (uint256 i; i < voters; ++i) {
-            address a = i < n ? jobArms[jobId][i] : j.tieBreaker;
+            address a = _voter(jobId, j, i);
             arms[a].locked -= tranche;
             if (!entries[jobId][a].revealed) {
                 uint256 loss = share + dust;
                 dust = 0;
                 arms[a].bond -= loss;
                 totalBonded -= loss;
+                _checkpointBond(a);
                 _strike(a);
                 emit NoShowCompensation(jobId, a, loss);
             }
@@ -653,7 +666,7 @@ contract Arms {
         totalEscrow -= refund;
         // Compensation is one full fee, without a burn: it is not an adjudicated answer payment.
         for (uint256 i; i < voters; ++i) {
-            address a = i < n ? jobArms[jobId][i] : j.tieBreaker;
+            address a = _voter(jobId, j, i);
             if (entries[jobId][a].revealed) {
                 _send(a, j.feePerArm);
                 emit Paid(jobId, a, j.feePerArm, 0);
@@ -669,7 +682,7 @@ contract Arms {
     function settle(uint256 jobId) external {
         Job storage j = jobs[jobId];
         if (j.phase == Phase.REVEAL) {
-            if (!_allRevealed(jobId, j)) revert NotPending();
+            if (_count(jobId, true) != jobArms[jobId].length) revert NotPending();
             (uint32 mask, uint8 count) = resultCalculator.disputes(jobId);
             if (mask != 0 && j.needed == 2) {
                 j.disputedMask = mask;
@@ -699,16 +712,12 @@ contract Arms {
         if (block.timestamp <= j.challengeEnd || j.openChallenges != 0) revert StillLocked();
         j.released = true;
         uint256 tranche = trancheMultiple * j.feePerArm;
-        for (uint256 i; i < jobArms[jobId].length; ++i) {
-            if (!slashedIn[jobId][jobArms[jobId][i]]) arms[jobArms[jobId][i]].locked -= tranche;
+        uint256 voters = jobArms[jobId].length + (j.tieBreaker != address(0) ? 1 : 0);
+        for (uint256 i; i < voters; ++i) {
+            address a = _voter(jobId, j, i);
+            if (!slashedIn[jobId][a]) arms[a].locked -= tranche;
         }
-        if (j.tieBreaker != address(0) && !slashedIn[jobId][j.tieBreaker]) arms[j.tieBreaker].locked -= tranche;
-        if (!j.rewardPaid && j.reward > 0) {
-            uint256 r = j.reward;
-            j.reward = 0;
-            totalRewards -= r;
-            token.burn(r);
-        }
+        if (!j.rewardPaid && j.reward > 0) _burnReward(j);
         emit Released(jobId);
     }
 
@@ -791,9 +800,12 @@ contract Arms {
         --j.openChallenges;
 
         KeyResult storage kr = results[jobId][key];
+        bool standing = kr.status == Status.AGREED || kr.status == Status.MAJORITY;
         bool stakeBack = true;
         if (r == ICourt.Ruling.CLAIMED || r == ICourt.Ruling.NEITHER) {
-            if (kr.status == Status.AGREED || kr.status == Status.MAJORITY) {
+            // A CLAIMED ruling also corrects a key an earlier NEITHER ruling overturned: the court has
+            // now attested a value for it. `_slash` is idempotent, so the arms are not slashed twice.
+            if (standing || (r == ICourt.Ruling.CLAIMED && kr.status == Status.OVERTURNED)) {
                 bytes32 stored = kr.value;
                 if (r == ICourt.Ruling.CLAIMED) {
                     kr.status = Status.CORRECTED;
@@ -812,17 +824,17 @@ contract Arms {
                 _send(c.challenger, reward);
                 emit RewardPaid(jobId, c.challenger, reward);
             }
-        } else if (r == ICourt.Ruling.STORED && !j.overturned) {
+        } else if (r == ICourt.Ruling.STORED && standing) {
+            // Gated on this key, not on the job: a challenger ruled wrong forfeits the stake whatever
+            // happened on other keys and in whatever order the cases are resolved. The stake goes to
+            // the arms that gave the value and were not slashed on another key; with none left it burns.
             stakeBack = false;
             _splitStake(jobId, j, key, kr.value, c.stake);
         }
         totalStakes -= c.stake;
         if (stakeBack) _send(c.challenger, c.stake);
         if (j.openChallenges == 0 && block.timestamp > j.challengeEnd && !j.rewardPaid && j.reward > 0) {
-            uint256 burn = j.reward;
-            j.reward = 0;
-            totalRewards -= burn;
-            token.burn(burn);
+            _burnReward(j);
         }
         emit Resolved(jobId, key, claimedValue, r);
     }
@@ -835,7 +847,9 @@ contract Arms {
         return resultCalculator.verdict(jobId);
     }
 
-    /// @notice The newest settled job for a target under a form. `jobId` zero means none.
+    /// @notice The last job for a target under a form that settled with at least one AGREED or MAJORITY
+    /// key and whose `atBlock` is not below the previous one's. A job with no answer, or one about an
+    /// older block than the verdict already recorded, never replaces it. `jobId` zero means none.
     function latest(uint256 targetChainId, address target, bytes32 formId)
         external
         view
@@ -880,13 +894,22 @@ contract Arms {
         emit Drawn(jobId, a, tie);
     }
 
+    /// @dev Records the arm's bond for jobs posted after this change; `_eligible` reads the bond an arm
+    /// had when the job was posted.
+    function _checkpointBond(address a) internal {
+        formRegistry.noteBond(a, jobCount, arms[a].bond);
+    }
+
     function _eligible(uint256 jobId, Job storage j, address a) internal view returns (bool) {
-        if (a == address(0) || a == j.poster || wasDrawn[jobId][a] || lastStateChange[a] >= j.postedBlock) {
-            return false;
-        }
+        // The zero address (`candidate` returned none) fails the bond check below like any stranger.
+        if (a == j.poster || wasDrawn[jobId][a] || lastStateChange[a] >= j.postedBlock) return false;
         ArmInfo storage s = arms[a];
-        if (s.bond < minBond || s.inactive || (s.exiting && exitAfterJob[a] < jobId)) return false;
-        return s.bond - s.locked >= trancheMultiple * j.feePerArm;
+        if (s.inactive || (s.exiting && exitAfterJob[a] < jobId)) return false;
+        // The bond counted is the smaller of the bond at posting time and the bond now: a top-up after
+        // the post does not count, a loss after it does.
+        uint256 b = formRegistry.bondAsOf(a, jobId);
+        if (s.bond < b) b = s.bond;
+        return b >= minBond && b >= s.locked + trancheMultiple * j.feePerArm;
     }
 
     function _checkActor(uint256 jobId, Job storage j, address arm) internal view {
@@ -902,18 +925,20 @@ contract Arms {
         return false;
     }
 
-    function _allCommitted(uint256 jobId, Job storage) internal view returns (bool) {
+    /// @dev How many main arms have revealed (`revealed`) or committed.
+    function _count(uint256 jobId, bool revealed) internal view returns (uint256 n) {
         for (uint256 i; i < jobArms[jobId].length; ++i) {
-            if (!entries[jobId][jobArms[jobId][i]].committed) return false;
+            Entry storage e = entries[jobId][jobArms[jobId][i]];
+            if (revealed ? e.revealed : e.committed) ++n;
         }
-        return true;
     }
 
-    function _allRevealed(uint256 jobId, Job storage) internal view returns (bool) {
-        for (uint256 i; i < jobArms[jobId].length; ++i) {
-            if (!entries[jobId][jobArms[jobId][i]].revealed) return false;
-        }
-        return true;
+    /// @dev Burns the job's unearned challenger reward.
+    function _burnReward(Job storage j) internal {
+        uint256 r = j.reward;
+        j.reward = 0;
+        totalRewards -= r;
+        token.burn(r);
     }
 
     function _strike(address a) internal {
@@ -930,8 +955,10 @@ contract Arms {
 
     function _finalize(uint256 jobId, Job storage j, bool withTie) internal {
         ArmsResults.Outcome memory o = resultCalculator.settlement(jobId, withTie);
+        bool answered;
         for (uint8 k; k < j.keyCount; ++k) {
             results[jobId][k] = KeyResult(o.values[k], o.statuses[k]);
+            if (o.statuses[k] == Status.AGREED || o.statuses[k] == Status.MAJORITY) answered = true;
         }
         for (uint256 i; i < jobArms[jobId].length; ++i) {
             _pay(jobId, j, jobArms[jobId][i], o.payments[i]);
@@ -942,7 +969,13 @@ contract Arms {
         totalEscrow -= back;
         j.phase = Phase.SETTLED;
         j.challengeEnd = uint64(block.timestamp + challengeWindow);
-        latestJob[j.targetChainId][j.target][j.formId] = jobId;
+        // Only a job that carries an answer, about a block no older than the recorded verdict's,
+        // becomes the target's latest: an arm answering UNKNOWN everywhere, an unfilled tie break or
+        // a reading at an old block cannot erase what readers already have.
+        uint256 prev = latestJob[j.targetChainId][j.target][j.formId];
+        if (answered && (prev == 0 || jobs[prev].atBlock <= j.atBlock)) {
+            latestJob[j.targetChainId][j.target][j.formId] = jobId;
+        }
         if (back > 0) _send(j.poster, back);
         emit Settled(jobId, j.spent, back);
     }
@@ -958,25 +991,20 @@ contract Arms {
         emit Paid(jobId, arm, amount, burned);
     }
 
-    function _gave(uint256 jobId, Job storage j, address a, uint8 key, bytes32 value) internal view returns (bool) {
-        if (a == j.tieBreaker && j.disputedMask & (uint32(1) << key) == 0) return false;
-        return answerOf[jobId][a][key] == value;
-    }
-
+    /// @dev Slashes every voter that gave `stored` on `key` and was not slashed in this job before.
     function _slash(uint256 jobId, Job storage j, uint8 key, bytes32 stored) internal {
         uint256 tranche = trancheMultiple * j.feePerArm;
-        uint256 total;
-        uint256 voters = jobArms[jobId].length + (j.tieBreaker != address(0) ? 1 : 0);
-        for (uint256 i; i < voters; ++i) {
-            address a = i < jobArms[jobId].length ? jobArms[jobId][i] : j.tieBreaker;
-            if (slashedIn[jobId][a] || !_gave(jobId, j, a, key, stored)) continue;
+        address[] memory givers = resultCalculator.givers(jobId, key, stored);
+        for (uint256 i; i < givers.length; ++i) {
+            address a = givers[i];
             slashedIn[jobId][a] = true;
             arms[a].bond -= tranche;
             lastStateChange[a] = Blocks.number(arbitrumBlocks);
             arms[a].locked -= tranche;
-            total += tranche;
+            _checkpointBond(a);
             emit Slashed(jobId, a, tranche);
         }
+        uint256 total = givers.length * tranche;
         if (total == 0) return;
         totalBonded -= total;
         if (!j.slashedOnce) {
@@ -993,14 +1021,10 @@ contract Arms {
         }
     }
 
-    function _splitStake(uint256 jobId, Job storage j, uint8 key, bytes32 stored, uint256 stake) internal {
-        uint256 voters = jobArms[jobId].length + (j.tieBreaker != address(0) ? 1 : 0);
-        address[] memory givers = new address[](voters);
-        uint256 g;
-        for (uint256 i; i < voters; ++i) {
-            address a = i < jobArms[jobId].length ? jobArms[jobId][i] : j.tieBreaker;
-            if (_gave(jobId, j, a, key, stored)) givers[g++] = a;
-        }
+    /// @dev Splits a forfeited stake among the unslashed voters that gave `stored`; burns it with none.
+    function _splitStake(uint256 jobId, Job storage, uint8 key, bytes32 stored, uint256 stake) internal {
+        address[] memory givers = resultCalculator.givers(jobId, key, stored);
+        uint256 g = givers.length;
         if (g == 0) {
             token.burn(stake);
             return;

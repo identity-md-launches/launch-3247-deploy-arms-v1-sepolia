@@ -55,6 +55,24 @@ contract MockCourt is ICourt {
         return chainId == 11155111 || chainId == 4663;
     }
 
+    /// @notice Unlike `IMDCourt`, which vouches for nothing until its owner publishes a head, the mock
+    /// vouches for the first 2^32 blocks of every chain so local tests can post about any chain. A
+    /// test that needs the real behaviour publishes a head (zero included) with `setConfirmedHead`.
+    uint256 public constant DEFAULT_HEAD = type(uint32).max;
+
+    mapping(uint256 => uint256) internal heads;
+    mapping(uint256 => bool) internal headSet;
+
+    function confirmedHead(uint256 chainId) external view returns (uint256) {
+        return headSet[chainId] ? heads[chainId] : DEFAULT_HEAD;
+    }
+
+    /// @notice Anyone publishes a head, this is a mock.
+    function setConfirmedHead(uint256 chainId, uint256 head) external {
+        heads[chainId] = head;
+        headSet[chainId] = true;
+    }
+
     function ask(
         bytes32 caseId,
         bytes32 formId,

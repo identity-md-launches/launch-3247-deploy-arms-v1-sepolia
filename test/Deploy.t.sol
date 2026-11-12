@@ -67,9 +67,11 @@ contract DeployTest is Test {
         assertEq(servers, 0);
         ArmsForms registry = arms.formRegistry();
         vm.expectRevert(ArmsForms.OnlyArms.selector);
-        registry.serve(form, address(this), 1 ether);
+        registry.serve(form, address(this), 1 ether, 0);
         vm.expectRevert(ArmsForms.OnlyArms.selector);
         registry.stop(form, address(this), 1, 0);
+        vm.expectRevert(ArmsForms.OnlyArms.selector);
+        registry.noteBond(address(this), 0, 1 ether);
         vm.expectRevert(ArmsForms.OnlyArms.selector);
         registry.register(keccak256("bypass"), 1, "ipfs://bypass");
     }

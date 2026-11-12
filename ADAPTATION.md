@@ -104,6 +104,67 @@ approval is claimed. Retained operational/security limitations are listed in `RE
   including long-string fallback and chain-ID changes. Canonical protocol digest/question vectors
   and actual callback signature tests still pass. The production Slither HIGH scan now has zero results.
 
+## Revision: review findings that reopened the launch
+
+Each of the four reproducible findings came with a proof test. All four failed on the accepted tree
+and pass now; the suite is 119 tests (113 before), run with the verifier's fuzz seed. Constructors,
+`launch.json` and the manifest order are unchanged. Arms' runtime is 24,431 bytes (EIP-170 limit
+24,576): the review fixes added about 870 bytes, so the "who gave the stored value" scan moved into
+the read-only `ArmsResults` helper and a few internal loops were deduplicated with no change in
+behaviour (`_count`, `_voter`, `_burnReward`).
+
+### 22cf09bc — remote `atBlock` unbounded (src/Arms.sol, src/ICourt.sol, src/IMDCourt.sol, src/mocks/MockCourt.sol) — fixed
+
+`ICourt` gains `confirmedHead(chainId)`. `Arms.post` bounds a remote target's `atBlock` by it with
+the same `MIN_BLOCK_DEPTH` rule a local target gets from this chain's height; zero admits nothing.
+`IMDCourt` publishes nothing by default; its owner (already a trusted role since the previous
+round's signer rotation) sets a head with `setConfirmedHead`, only for a supported chain other than
+the executing one, and only forward. `MockCourt` vouches for the first 2^32 blocks of every chain
+unless a test publishes a head, so the existing suite and the reviewer's proofs, which run on chain
+31337 and post about Sepolia, keep working; `test/IMDCourt.t.sol` publishes a head in its fixture.
+Tests: `RemoteHeadTest` in `test/RevisionRegressions.t.sol` (bounds, zero head, nothing moves on a
+refused post, a fuzzed boundary, and the real court's owner-only/forward-only/remote-only setter).
+
+### 27019183 — free opt-out through `bond`, `serve` or a fee raise (src/Arms.sol, src/ArmsForms.sol) — fixed
+
+`ArmsForms` now records, per arm, the fee it advertised for a form and the bond it held, keyed by
+the id of the last job posted before each change (OpenZeppelin `Checkpoints.Trace208`, already in
+`lib/`). `candidate` answers with the fee as of the job's posting (`feeAsOf`); a stop writes fee 0,
+so a re-serve after a stop does not reach jobs posted in between. `Arms._eligible` counts the
+smaller of `bondAsOf(arm, jobId)` and the current bond. `Arms.serve` no longer touches
+`lastStateChange`; `Arms.bond` bumps it only when the top-up makes the arm newly active (first bond
+above `minBond` or a cancelled exit). Every bond change (`bond`, `withdraw`, a no-show loss, a slash)
+checkpoints through `_checkpointBond`. Both directions are closed: an arm cannot leave an older job
+by re-serving, raising its fee or adding one wei, and cannot join one by serving, cutting its fee,
+re-serving or topping up after the post. `test_audit2_stateChangeInPostingBlockOrAfterExcludesOldJob`
+encoded the old same-block exclusion and was rewritten to the new rule (a cancelled exit and a fee
+cut in the posting block still cannot join). Tests: `DrawOptOutTest`.
+
+### b3e816d4 — CLAIMED after NEITHER on the same key never corrected it (src/Arms.sol) — fixed
+
+`resolve` applies a CLAIMED ruling when the key is still AGREED/MAJORITY **or** already OVERTURNED:
+the value becomes the claimed one and the status CORRECTED. `_slash` is idempotent through
+`slashedIn`, so no arm is slashed twice and nothing more is burned. Tests: `ClaimedAfterNeitherTest`
+(both resolve orders, one tranche per arm, reward and stake accounting).
+
+### 31484f86 — `_finalize` wrote `latestJob` unconditionally (src/Arms.sol) — fixed
+
+`_finalize` records the job as the target's latest only when at least one key is AGREED or MAJORITY
+and `j.atBlock` is not below the recorded verdict's `atBlock`. The job itself still settles, pays and
+refunds exactly as before. Tests: `LatestVerdictTest` (all-UNKNOWN arm, older block, same block,
+newer block, partly answered job).
+
+### 42d06392 (advisory) — job-wide `overturned` flag gated the STORED split — judged real, fixed
+
+Reproduced: with key 0 CLAIMED and key 1 STORED, the wrong challenger kept or lost its stake
+depending on resolve order, and after any overturn every other key could be challenged stake-free
+while `release` stayed locked. `resolve` now gates the split on the challenged key's own status
+(still AGREED/MAJORITY): the stake goes to the givers not slashed in this job and burns when none
+remains; a STORED ruling on a key another case already changed returns the stake. `_splitStake`
+and `_slash` share `ArmsResults.givers`, which excludes slashed voters. The documented rule in the
+README changed accordingly, and `test_resolve_storedAfterOverturnReturnsStake` became
+`test_resolve_storedAfterOverturnBurnsStakeWhenEveryGiverWasSlashed`. Tests: `StoredStakeTest`.
+
 ## Other requested deliverables
 
 | Files | Purpose and verification |

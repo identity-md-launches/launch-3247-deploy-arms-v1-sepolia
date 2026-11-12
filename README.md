@@ -117,7 +117,10 @@ and windows are nonzero; bond caps must cover the derived minimum. All token amo
 
 `IMDCourt.supportsChain` accepts **11155111 (Sepolia)** and **4663 (Robinhood Chain)**, preserving the
 accepted list. Arms delegates target-chain admission to the court. This list is separate from the
-chain Arms executes on. Block mode comes from the deployment's `block.chainid`, never bytecode
+chain Arms executes on. A target on the executing chain is bounded by that chain's own height; a
+target on the other chain is bounded by the court's **confirmed head** for it, which starts at zero
+(nothing admitted) and which only the court owner moves, forward, with `setConfirmedHead(4663, head)`.
+Until the owner publishes one, every post about a Robinhood Chain target reverts `BadTarget`. Block mode comes from the deployment's `block.chainid`, never bytecode
 presence at a precompile or a constructor flag: 42161, 42170, 421614, 4663 and 46630 use ArbSys at
 address 100; other chains use EVM block numbers/hashes. An additional Orbit chain needs an explicit
 source update before deploying there. The configured deployment here remains Sepolia.
@@ -139,14 +142,19 @@ address cannot add a server entry. Each arm has one permanent index per form. St
 never remove, reorder or duplicate that index. `minFeeOf` retains the last advertised fee after a stop;
 `stoppedAt` indicates the stop instead of erasing that fee.
 
-A job stores the form-list length (`serverCount`) and chain-local posting block (`postedBlock`). Bond,
-withdrawal, serve/fee update, reactivation, strike and slash update `lastStateChange`. It must be
-**strictly earlier** than the posting block for a draw, including replacements and the initial tie
-breaker. Same-block enrollment is excluded. New entries cannot join an older job. As explicitly required,
-exit and stop record the last posted job id instead: they exclude jobs posted later (including
-within the same block), but
-cannot opt out of an older job after its seed is visible. An already selected arm retains its duties
-and locked tranche regardless of these later changes. Signer rotation does not change eligibility.
+A job stores the form-list length (`serverCount`) and chain-local posting block (`postedBlock`). A
+change that makes an arm newly active (its first bond above `minBond`, a bond that cancels an exit,
+reactivation), a withdrawal, a strike and a slash update `lastStateChange`. It must be **strictly
+earlier** than the posting block for a draw, including replacements and the initial tie breaker, so a
+newly active arm cannot join an older job. Everything else is prospective **by job id**: a serve, a
+fee change, a stop, an exit and an already active arm's bond top-up apply to jobs posted after them
+and never to a job posted before. The registry keeps the fee an arm advertised, and the bond it held,
+as of each job's posting (`ArmsForms.feeAsOf`, `ArmsForms.bondAsOf`): `candidate` uses the fee of
+the job's own time, and the draw counts the smaller of the bond then and the bond now. So an arm can
+neither opt out of an older job after its seed is visible (by re-serving, raising its fee or topping
+up one wei) nor opt in to one (by serving, cutting its fee, re-serving after a stop or topping up).
+An already selected arm retains its duties and locked tranche regardless of these later changes.
+Signer rotation does not change eligibility.
 
 The draw seed uses the block after posting/reopening and the job id. At the first draw it is saved.
 **One opening has one seed.** `draw` reverts `TooEarly` until that block is mined and `SeedExpired`
@@ -171,8 +179,10 @@ after one day. The core does not enforce one human/operator per arm.
 `post(formId, targetChainId, target, atBlock, feePerArm)` pulls `3 * feePerArm`. The target and block
 must be nonzero and the block must fit the oracle's exact JSON integer range. For this same chain,
 `atBlock + MIN_BLOCK_DEPTH <= Blocks.number(...)`, with `MIN_BLOCK_DEPTH = 5`, is enforced before
-escrow moves. Arbitrum uses its own ArbSys height. For another target chain, the poster must still
-verify the confirmed head externally; Arms has no cross-chain head oracle.
+escrow moves. Arbitrum uses its own ArbSys height. For the other supported target chain the same
+rule applies against `court.confirmedHead(targetChainId)`, the head the court owner last published
+for it; with none published (zero) no remote post is admitted. Every job Arms records can therefore
+be asked about with a window the oracle can read.
 Anyone may `draw`, `timeout`, `cancel`, `settle`, `resolve` or `release`.
 
 - `commit(jobId, arm, hash)` and `reveal(jobId, arm, values, salt, evidenceURI)` require the caller to be
@@ -203,7 +213,11 @@ Anyone may `draw`, `timeout`, `cancel`, `settle`, `resolve` or `release`.
   Each missing arm receives a strike; timely revealers do not. Every tranche is unlocked, the job is
   SETTLED and already released, and no key is challengeable. A job closed this way carries no
   answer, so it is **not** recorded as the target's latest verdict: `latest()` keeps returning the
-  last job that settled with answers, and one silent arm cannot erase it. Escrow `spent` stays zero; the separate
+  last job that settled with answers, and one silent arm cannot erase it. The same rule holds for a
+  normal settlement: `_finalize` records a job as the target's latest only when at least one key is
+  AGREED or MAJORITY (an arm answering UNKNOWN on every key, or an unfilled tie break with every key
+  disputed, leaves `latest()` alone) **and** its `atBlock` is not below the recorded verdict's, so a
+  truthful reading at an old block does not replace a newer one. Escrow `spent` stays zero; the separate
   `NoShowCompensation` event records each bond debit. This is the only bond reduction besides a ruled
   challenge (apart from an arm withdrawing its own unlocked bond).
 - The same closure applies when an assigned tie breaker misses commit or reveal, because the main
@@ -230,12 +244,17 @@ question hash and verifies the protocol's full 15-field EIP-712 attestation in i
 sender, the pending request, panel minimums, freshness and replay protection. The callback only stores
 a ruling within its 200,000 gas allowance; `resolve` performs transfers separately.
 
-CLAIMED corrects a key; NEITHER overturns it. Arms that gave the stored wrong value each lose at most
-one locked tranche per job. The first slash refunds the job's actual escrow expenditure, sets aside
-the configured reward fraction of the remainder, and burns the rest. The first CLAIMED ruling earns
-the reward; later slashes burn their proceeds. STORED splits the challenge stake among the arms that
-gave the stored value, unless the job has already been overturned, when the stake returns. A pending
-reward from NEITHER remains available for a later CLAIMED ruling inside the window.
+CLAIMED corrects a key; NEITHER overturns it. Several cases may be open on one key (one per claimed
+value), and a CLAIMED ruling also corrects a key that an earlier NEITHER ruling on it overturned, so
+the court-attested value is recorded whichever case is resolved first. Arms that gave the stored
+wrong value each lose at most one locked tranche per job. The first slash refunds the job's actual
+escrow expenditure, sets aside the configured reward fraction of the remainder, and burns the rest.
+The first CLAIMED ruling earns the reward; later slashes burn their proceeds. STORED on a key that
+still stands as the arms gave it (AGREED or MAJORITY) forfeits the stake, whatever happened on other
+keys and in whatever order the cases are resolved: it is split among the arms that gave the value
+and were not slashed in this job, and burned when none remains. STORED on a key another case has
+already corrected or overturned returns the stake. A pending reward from NEITHER remains available
+for a later CLAIMED ruling inside the window.
 
 **Accepted for v1: a challenge with no ruling returns the full stake after `courtDeadline`.** The
 stored verdict is unchanged and the Intake fee remains spent. Failure callbacks are unsigned and do
@@ -375,6 +394,9 @@ explicitly local test attester. Those signatures have no live oracle authority.
    `https://raw.githubusercontent.com/identity-md-launches/launch-3241-build-test-deploy-sepolia/<commit>/forms/control-map-v1.txt`.
    The final URI/formId cannot be truthfully fixed before the worker publishes the commit. Submit
    `registerForm(textHash,13,uri)` once and retain the receipt. Check the returned formId against the helper.
+   Targets on Robinhood Chain (4663) are admitted only after the court owner publishes a confirmed
+   head for it with `IMDCourt.setConfirmedHead(4663, head)`, using a height it has itself confirmed
+   as final; the Sepolia check and challenge below need no head, since Sepolia is the executing chain.
 3. The owner transfers at least 500 ARMT to each of three test wallets, plus poster escrow and
    challenger stake funds. Each arm approves Arms for its intended bond, bonds (500 ARMT in the
    test plan), and calls `serve(formId,1e18)`. The poster and challenger are distinct from the arms.

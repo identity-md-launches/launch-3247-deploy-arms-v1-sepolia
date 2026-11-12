@@ -31,6 +31,9 @@ contract IMDCourtTest is ArmsBase {
         super.setUp();
         intake = new MockIntake(WRITER, makeAddr("treasury"), ACTION, address(token), PRICE);
         imdCourt = new IMDCourt(tokenOwner, IIntake(address(intake)), IERC20(address(token)), ACTION, SIGNER);
+        // The fixture runs on chain 31337, so Sepolia is a remote target here: publish a head for it.
+        vm.prank(tokenOwner);
+        imdCourt.setConfirmedHead(CHAIN, 20_000_000);
         // A second Arms wired to the IMD court, same token for bonds and for the oracle fee.
         arms = _deploy(sepoliaParams(address(token), address(imdCourt)));
         formId = arms.registerForm(

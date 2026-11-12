@@ -58,6 +58,7 @@ contract IMDCourt is ICourt, OracleAttestationConsumer, Ownable {
         address indexed asker, bytes32 indexed caseId, bytes32 indexed requestId, uint8 status, bytes32 reason
     );
     event OracleConfigSet(address indexed intake, address indexed asset, bytes32 action);
+    event ConfirmedHeadSet(uint256 indexed chainId, uint256 head);
 
     uint16 public constant PANEL_SIZE = 5;
     uint16 public constant QUORUM = 4;
@@ -67,6 +68,9 @@ contract IMDCourt is ICourt, OracleAttestationConsumer, Ownable {
     IIntake public intake;
     IERC20 public asset;
     bytes32 public action;
+
+    /// @notice The confirmed head the owner last published for a remote target chain; zero until then.
+    mapping(uint256 chainId => uint256 head) public confirmedHead;
 
     mapping(bytes32 caseKey => Case) internal cases;
     mapping(address requestIntake => mapping(bytes32 requestId => bytes32 caseKey)) internal caseOfRequest;
@@ -90,6 +94,15 @@ contract IMDCourt is ICourt, OracleAttestationConsumer, Ownable {
     /// @notice Rotates the live attester for all open and future cases, including key revocation.
     function setSigner(address signer_) external onlyOwner {
         _setOracleSigner(signer_);
+    }
+
+    /// @notice Publishes a confirmed head for a supported remote target chain. Heads only move forward.
+    /// The executing chain needs none: `Arms` reads its own height for local targets. Until a head is
+    /// published for a remote chain, `Arms.post` refuses every target on it.
+    function setConfirmedHead(uint256 chainId, uint256 head) external onlyOwner {
+        if (!supportsChain(chainId) || chainId == block.chainid || head <= confirmedHead[chainId]) revert BadParams();
+        confirmedHead[chainId] = head;
+        emit ConfirmedHeadSet(chainId, head);
     }
 
     function _setOracleConfig(IIntake intake_, IERC20 asset_, bytes32 action_) internal {
